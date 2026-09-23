@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
@@ -30,11 +31,24 @@ def natural_key(step: str):
     return [int(part) if part.isdigit() else part.upper() for part in re.split(r"(\d+)", step)]
 
 
-def write_mapping(
+@dataclass
+class Sheet:
+    name: str
+    results: list[StepResult] = field(default_factory=list)
+    error: str | None = None  # shown on the sheet when the sequence could not be read
+
+
+def write_mapping(output_path: str, results: list[StepResult], *, sheet_name: str = "Mapping",
+                  checks: list[str] | None = None, **layout) -> None:
+    """Create `output_path` with a single sheet (see write_workbook for `layout`)."""
+    write_workbook(output_path, [Sheet(sheet_name, results)], checks=checks, **layout)
+
+
+def write_workbook(
     output_path: str,
-    results: list[StepResult],
+    sheets: list[Sheet],
     *,
-    sheet_name: str = "Mapping",
+    checks: list[str] | None = None,
     step_column: str = "A",
     step_number_column: str | None = "B",
     number_column: str = "C",
@@ -47,9 +61,9 @@ def write_mapping(
     separator: str = "OR",
     not_found_text: str = "",
     sort: bool = True,
-    checks: list[str] | None = None,
 ) -> None:
-    """Create `output_path` with one row per step (alphabetical when `sort`).
+    """Create `output_path` with one sheet per sequence, one row per step
+    (alphabetical when `sort`).
 
     `step_number_column` receives the digits of the step name (T10 -> 10).
     Headers are written on `start_row` (unless both headers are None) and the data
@@ -57,45 +71,50 @@ def write_mapping(
     `checks` (points for a human to verify) are listed on a separate "Check" sheet.
     """
     wb = Workbook()
-    ws = wb.active
-    ws.title = sheet_name
+    wb.remove(wb.active)
 
     step_col = column_index_from_string(step_column.upper())
     step_no_col = column_index_from_string(step_number_column.upper()) if step_number_column else None
     number_col = column_index_from_string(number_column.upper())
     pages_col = column_index_from_string(pages_column.upper()) if pages_column else None
 
-    row = start_row
-    if step_header is not None or number_header is not None:
-        headers = [(step_col, step_header), (number_col, number_header)]
-        if step_no_col:
-            headers.append((step_no_col, step_number_header))
-        if pages_col:
-            headers.append((pages_col, pages_header))
-        for col, text in headers:
-            if text is not None:
-                ws.cell(row=row, column=col, value=text).font = Font(bold=True)
-        row += 1
+    for sheet in sheets:
+        ws = wb.create_sheet(sheet.name[:31])
+        row = start_row
+        if step_header is not None or number_header is not None:
+            headers = [(step_col, step_header), (number_col, number_header)]
+            if step_no_col:
+                headers.append((step_no_col, step_number_header))
+            if pages_col:
+                headers.append((pages_col, pages_header))
+            for col, text in headers:
+                if text is not None:
+                    ws.cell(row=row, column=col, value=text).font = Font(bold=True)
+            row += 1
 
-    if sort:
-        results = sorted(results, key=lambda r: natural_key(r.step))
-    for result in results:
-        ws.cell(row=row, column=step_col, value=result.step)
-        if step_no_col:
-            ws.cell(row=row, column=step_no_col, value=step_digits(result.step))
-        value = _cell_value(result.numbers, separator)
-        number_cell = ws.cell(row=row, column=number_col, value=value)
-        if value is None:
-            if not_found_text:
-                number_cell.value = not_found_text
-            number_cell.fill = NOT_FOUND_FILL
-        if pages_col and result.pages:
-            ws.cell(row=row, column=pages_col, value=", ".join(map(str, result.pages)))
-        row += 1
+        if sheet.error:
+            cell = ws.cell(row=row, column=step_col, value=f"ERROR: {sheet.error}")
+            cell.font = Font(bold=True, color="FF0000")
+            ws.sheet_properties.tabColor = "FF0000"
 
-    for col, width in ((step_col, 15), (step_no_col, 10), (number_col, 40), (pages_col, 15)):
-        if col:
-            ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = width
+        results = sorted(sheet.results, key=lambda r: natural_key(r.step)) if sort else sheet.results
+        for result in results:
+            ws.cell(row=row, column=step_col, value=result.step)
+            if step_no_col:
+                ws.cell(row=row, column=step_no_col, value=step_digits(result.step))
+            value = _cell_value(result.numbers, separator)
+            number_cell = ws.cell(row=row, column=number_col, value=value)
+            if value is None:
+                if not_found_text:
+                    number_cell.value = not_found_text
+                number_cell.fill = NOT_FOUND_FILL
+            if pages_col and result.pages:
+                ws.cell(row=row, column=pages_col, value=", ".join(map(str, result.pages)))
+            row += 1
+
+        for col, width in ((step_col, 15), (step_no_col, 10), (number_col, 40), (pages_col, 15)):
+            if col:
+                ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = width
 
     if checks:
         check = wb.create_sheet("Check")

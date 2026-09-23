@@ -55,17 +55,29 @@ pip install -r requirements.txt
 
 ## Usage
 
-Graphical interface (file pickers, column / row settings):
+Graphical interface (file pickers, sequence table, column / row settings):
 
 ```bash
 python -m translator
 ```
+
+The window has a **sequence table** (17 rows by default, "Add row" for more): each row
+is one table of PDF 1 and becomes one sheet (`Sequence 01`, `Sequence 02`, ...) of the
+same Excel file. Fill in the PDF 1 pages and/or PDF 2 pages of a row to include it;
+the section is pre-filled with `3.1`, `3.2`, ... and can be changed. Rows without page
+numbers are skipped. All inputs are remembered for the next run
+(`~/.translator_settings.json`). If one sequence fails, the other sheets are still
+written; the failed one gets a red tab with the error, and is listed on the Check sheet.
 
 Command line:
 
 ```bash
 python -m translator --pdf1 spec.pdf --section 3.1 --pdf2 steps.pdf --output mapping.xlsx
 python -m translator --pdf1 spec.pdf --pages 3-7 --pdf2 steps.pdf --output mapping.xlsx
+
+# several sequences -> sheets "Sequence 01", "Sequence 02", ... (section:PDF 1 pages:PDF 2 pages)
+python -m translator --pdf1 spec.pdf --pdf2 steps.pdf -o mapping.xlsx \
+    --sequence "3.1:3-7:100-250" --sequence "3.2:8-9:251-300"
 ```
 
 ### Options

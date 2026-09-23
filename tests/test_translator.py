@@ -352,3 +352,23 @@ def test_unexpected_text_in_step_column_is_reported(tmp_path, pdfs):
     texts = [c.value for c in wb["Check"]["A"]]
     assert any("'60'" in (t or "") for t in texts)
     assert any("No number found" in (t or "") for t in texts)
+
+
+def test_multiple_sequences_one_sheet_each(pdfs, tmp_path):
+    out = tmp_path / "mapping.xlsx"
+    rc = main(["--pdf1", str(pdfs[0]), "--pdf2", str(pdfs[1]), "--output", str(out),
+               "--sequence", "3.1:3:1-5",      # T00, T01, S01 (S01_1.._3), S02 not in pages
+               "--sequence", "3.2:3:",         # Z99, all PDF 2 pages
+               "--sequence", "3.9:99:"])       # bad page -> error sheet, others still written
+    assert rc == 1
+    wb = load_workbook(out)
+    assert wb.sheetnames == ["Sequence 01", "Sequence 02", "Sequence 03", "Check"]
+    rows = [r for r in wb["Sequence 01"].iter_rows(min_row=2, max_col=3, values_only=True)]
+    assert rows == [("S01", 1, "201 OR 202 OR 203"), ("S02", 2, None), ("T00", 0, 100),
+                    ("T01", 1, 101)]
+    assert [r for r in wb["Sequence 02"].iter_rows(min_row=2, max_col=3, values_only=True)] == \
+        [("Z99", 99, 777)]
+    assert "ERROR" in wb["Sequence 03"]["A2"].value
+    checks = [c.value for c in wb["Check"]["A"]]
+    assert any(c.startswith("Sequence 01: No number found in PDF 2 for: S02") for c in checks[1:])
+    assert any(c.startswith("Sequence 03: ERROR") for c in checks[1:])

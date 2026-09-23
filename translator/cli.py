@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import dataclass
 
-from .excel_writer import write_mapping
+from .excel_writer import Sheet, write_workbook
 from .pdf_numbers import DEFAULT_NUMBER_LABEL, find_step_numbers
 from .pdf_steps import DEFAULT_STEP_PATTERN, extract_step_names, parse_page_range
 
@@ -27,6 +28,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pdf2", help="PDF containing the step properties with the 'number:' field")
     p.add_argument("--pdf2-pages", help='PDF page numbers to search in PDF 2, e.g. "100-250" '
                                         "(default: all pages)")
+    p.add_argument("--sequence", action="append", metavar="SECTION:PAGES1:PAGES2",
+                   help='one sequence per option, e.g. --sequence "3.1:3-7:100-250" '
+                        '--sequence "3.2:8-9:251-300"; each becomes a sheet '
+                        '"Sequence 01", "Sequence 02", ... (parts may be left empty)')
     p.add_argument("--output", "-o", help="Excel file to create, e.g. mapping.xlsx")
 
     g = p.add_argument_group("PDF options")
@@ -70,40 +75,88 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def run(args: argparse.Namespace, log=print) -> int:
-    pages = parse_page_range(args.pages) if args.pages else None
+@dataclass
+class Job:
+    """One sequence: one table in PDF 1 -> one sheet in the Excel file."""
+    sheet: str
+    section: str | None = None
+    pages: str | None = None       # PDF 1 pages, e.g. "3-7"
+    pdf2_pages: str | None = None  # PDF 2 pages, e.g. "100-250"
+
+
+def parse_sequence(text: str, index: int) -> Job:
+    """--sequence "3.1:3-7:100-250" (section:PDF 1 pages:PDF 2 pages; parts may be empty)."""
+    parts = [p.strip() or None for p in (text.split(":") + ["", ""])[:3]]
+    if not parts[0] and not parts[1]:
+        raise ValueError(f"--sequence {text!r}: give a section and/or PDF 1 pages")
+    return Job(f"Sequence {index:02d}", *parts)
+
+
+def _run_job(job: Job, args, log, checks: list[str]) -> Sheet:
     where = " and ".join(filter(None, [
-        f"section {args.section}" if args.section else "",
-        f"pages {args.pages}" if args.pages else "",
+        f"section {job.section}" if job.section else "",
+        f"pages {job.pages}" if job.pages else "",
     ]))
-    log(f"Reading step names from {where} of {args.pdf1} ...")
+    log(f"[{job.sheet}] Reading step names from {where} of PDF 1 ...")
     warnings: list[str] = []
-    steps = extract_step_names(args.pdf1, args.section, args.step_pattern, args.table_strategy,
-                               pages=pages, log=log, warnings=warnings)
+    steps = extract_step_names(
+        args.pdf1, job.section, args.step_pattern, args.table_strategy,
+        pages=parse_page_range(job.pages) if job.pages else None, log=log, warnings=warnings,
+    )
     log(f"  {len(steps)} step(s) found: {', '.join(steps)}")
-    for w in warnings:
-        log(f"  CHECK: {w}")
 
-    pdf2_pages = parse_page_range(args.pdf2_pages) if args.pdf2_pages else None
-    in_pages = f" (pages {args.pdf2_pages})" if args.pdf2_pages else ""
-    log(f"Searching {args.pdf2}{in_pages} for '{args.number_label}' values ...")
-    by_step = find_step_numbers(args.pdf2, steps, args.number_label, args.name_label,
-                                pages=pdf2_pages)
+    in_pages = f" (pages {job.pdf2_pages})" if job.pdf2_pages else ""
+    log(f"[{job.sheet}] Searching PDF 2{in_pages} for '{args.number_label}' values ...")
+    by_step = find_step_numbers(
+        args.pdf2, steps, args.number_label, args.name_label,
+        pages=parse_page_range(job.pdf2_pages) if job.pdf2_pages else None,
+    )
     results = [by_step[s] for s in steps]
-
-    missing = [r.step for r in results if not r.numbers]
     for r in results:
         if r.numbers:
             variants = ", ".join(dict.fromkeys(m.variant for m in r.matches))
             log(f"  {r.step}: {f' {args.separator} '.join(r.numbers)}  (as {variants})")
+    missing = [r.step for r in results if not r.numbers]
     if missing:
         log(f"  WARNING: no number found for {len(missing)} step(s): {', '.join(missing)}")
         warnings.append(f"No number found in PDF 2 for: {', '.join(missing)}")
 
-    write_mapping(
+    for w in warnings:
+        log(f"  CHECK: {w}")
+    checks.extend(f"{job.sheet}: {w}" for w in warnings)
+    return Sheet(job.sheet, results)
+
+
+def run(args: argparse.Namespace, log=print, jobs: list[Job] | None = None) -> int:
+    """Process every job (sequence) and write one Excel file with a sheet per job.
+
+    Returns the number of sequences that failed (0 = all fine)."""
+    if jobs is None:
+        if args.sequence:
+            jobs = [parse_sequence(text, i) for i, text in enumerate(args.sequence, start=1)]
+        else:
+            jobs = [Job(args.sheet, args.section, args.pages, args.pdf2_pages)]
+    if not jobs:
+        raise ValueError("Nothing to do: no sequence was filled in")
+
+    checks: list[str] = []
+    sheets: list[Sheet] = []
+    failed = 0
+    for job in jobs:
+        try:
+            sheets.append(_run_job(job, args, log, checks))
+        except Exception as exc:
+            if len(jobs) == 1:
+                raise
+            failed += 1
+            log(f"[{job.sheet}] ERROR: {exc}")
+            checks.append(f"{job.sheet}: ERROR - {exc}")
+            sheets.append(Sheet(job.sheet, error=str(exc)))
+
+    write_workbook(
         args.output,
-        results,
-        sheet_name=args.sheet,
+        sheets,
+        checks=checks,
         step_column=args.step_column,
         step_number_column=args.step_number_column or None,
         number_column=args.number_column,
@@ -115,27 +168,29 @@ def run(args: argparse.Namespace, log=print) -> int:
         separator=args.separator,
         not_found_text=args.not_found,
         sort=not args.no_sort,
-        checks=warnings,
     )
-    log(f"Excel file written: {args.output}")
-    if warnings:
-        log(f"{len(warnings)} point(s) to check are listed above and on the 'Check' sheet.")
+    log(f"Excel file written: {args.output} ({len(sheets)} sheet(s))")
+    if failed:
+        log(f"{failed} sequence(s) FAILED - see the red sheet tabs and the 'Check' sheet.")
+    if checks:
+        log(f"{len(checks)} point(s) to check are listed above and on the 'Check' sheet.")
     else:
         log("Nothing to check: every text in the step-name column was taken as a step name.")
-    return 0
+    return failed
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.gui or not any([args.pdf1, args.pdf2, args.section, args.pages, args.output]):
+    if args.gui or not any([args.pdf1, args.pdf2, args.section, args.pages, args.sequence,
+                            args.output]):
         from .gui import launch
         return launch(parser)
 
     missing = [n for n in ("pdf1", "pdf2", "output") if not getattr(args, n)]
-    if not args.section and not args.pages:
-        missing.append("section (or --pages)")
+    if not args.section and not args.pages and not args.sequence:
+        missing.append("section (or --pages or --sequence)")
     if missing:
         parser.error("missing required option(s): " + ", ".join("--" + m for m in missing))
     try:
