@@ -38,18 +38,21 @@ def launch(parser: argparse.ArgumentParser) -> int:
 
     add_row(0, "PDF 1 (step names)", "pdf1", browse=open_pdf)
     add_row(1, "Section of the table (e.g. 3.1)", "section")
-    add_row(2, "PDF 2 (step numbers)", "pdf2", browse=open_pdf)
-    add_row(3, "Output Excel file", "output", browse=save_xlsx)
-    add_row(4, "Step column", "step_column", "A")
-    add_row(5, "Number column", "number_column", "B")
-    add_row(6, "Header row", "start_row", "1")
-    add_row(7, "Step header", "step_header", "Step")
-    add_row(8, "Number header", "number_header", "Number")
-    add_row(9, "Name label in PDF 2 (optional, e.g. name:)", "name_label")
-    add_row(10, "Pages column (optional, e.g. C)", "pages_column")
+    add_row(2, "Pages of the table (e.g. 3-7)", "pages")
+    add_row(3, "PDF 2 (step numbers)", "pdf2", browse=open_pdf)
+    add_row(4, "Output Excel file", "output", browse=save_xlsx)
+    add_row(5, "Step column", "step_column", "A")
+    add_row(6, "Number column", "number_column", "B")
+    add_row(7, "Header row", "start_row", "1")
+    add_row(8, "Step header", "step_header", "Step")
+    add_row(9, "Number header", "number_header", "Number")
+    add_row(10, "Name label in PDF 2 (optional, e.g. name:)", "name_label")
+    add_row(11, "Pages column (optional, e.g. C)", "pages_column")
+    tk.Label(root, text="Fill in the section, the pages, or both.", fg="gray").grid(
+        row=12, column=1, sticky="w", padx=6)
 
     log = scrolledtext.ScrolledText(root, width=90, height=15, state="disabled")
-    log.grid(row=12, column=0, columnspan=3, padx=6, pady=6)
+    log.grid(row=14, column=0, columnspan=3, padx=6, pady=6)
 
     def write_log(message: str):
         def append():
@@ -61,17 +64,24 @@ def launch(parser: argparse.ArgumentParser) -> int:
 
     def start():
         values = {k: v.get().strip() for k, v in fields.items()}
-        for key in ("pdf1", "section", "pdf2", "output"):
+        for key, label in (("pdf1", "PDF 1"), ("pdf2", "PDF 2"), ("output", "Output Excel file")):
             if not values[key]:
-                messagebox.showerror("Missing input", f"Please fill in: {key}")
+                messagebox.showerror("Missing input", f"Please fill in: {label}")
                 return
-        argv = ["--pdf1", values["pdf1"], "--section", values["section"],
+        if not values["section"] and not values["pages"]:
+            messagebox.showerror("Missing input", "Please fill in the section or the pages of the table")
+            return
+        argv = ["--pdf1", values["pdf1"],
                 "--pdf2", values["pdf2"], "--output", values["output"],
                 "--step-column", values["step_column"] or "A",
                 "--number-column", values["number_column"] or "B",
                 "--start-row", values["start_row"] or "1",
                 "--step-header", values["step_header"],
                 "--number-header", values["number_header"]]
+        if values["section"]:
+            argv += ["--section", values["section"]]
+        if values["pages"]:
+            argv += ["--pages", values["pages"]]
         if values["name_label"]:
             argv += ["--name-label", values["name_label"]]
         if values["pages_column"]:
@@ -89,6 +99,6 @@ def launch(parser: argparse.ArgumentParser) -> int:
 
         threading.Thread(target=work, daemon=True).start()
 
-    tk.Button(root, text="Create Excel", command=start).grid(row=11, column=1, pady=6)
+    tk.Button(root, text="Create Excel", command=start).grid(row=13, column=1, pady=6)
     root.mainloop()
     return 0

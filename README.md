@@ -10,12 +10,16 @@ Creates a new Excel file that maps each **step name** (from a table in PDF 1) to
 
 ## How it works
 
-1. **PDF 1 – step names.** The table is found by its section number (e.g. `3.1`).
+1. **PDF 1 – step names.** The table is found by its section number (e.g. `3.1`),
+   by its page numbers (e.g. `3-7`, as shown by the PDF viewer), or both.
    The section is located via the PDF bookmarks when there are some, otherwise by
-   searching the pages for the heading (table-of-contents lines are ignored).
-   The first table after the heading is read, including rows continued on the
-   following pages. Only the **first column** is used; cells that do not look like
-   a step name (header text such as "Step", empty cells) are skipped.
+   searching the pages for the heading (table-of-contents lines are ignored), and
+   runs until the next heading that is not a sub-section. Only the **first column**
+   of the tables in that part is used; cells that do not look like a step name
+   (header text such as "Step", empty cells) are skipped, and `T00 Start` gives `T00`.
+   Tables with and without ruling lines are tried; if no table can be read, the first
+   word of each text line is used. When no step is found the program stops and
+   shows the first-column cells it did read, so the problem is easy to spot.
 2. **PDF 2 – step numbers.** Every `number:` field is assigned to the closest step
    name written before it on the same page. Variants such as `S01_1`, `S01_2`, … are
    matched to `S01` (but `S010` is not).
@@ -51,6 +55,7 @@ Command line:
 
 ```bash
 python -m translator --pdf1 spec.pdf --section 3.1 --pdf2 steps.pdf --output mapping.xlsx
+python -m translator --pdf1 spec.pdf --pages 3-7 --pdf2 steps.pdf --output mapping.xlsx
 ```
 
 ### Options
@@ -69,7 +74,8 @@ python -m translator --pdf1 spec.pdf --section 3.1 --pdf2 steps.pdf --output map
 | `--number-label` | `number:` | Label of the number field in PDF 2 |
 | `--name-label` | | Label of the step name field in PDF 2 (e.g. `name:`). Use it if the property pages also mention other steps (e.g. "previous: S01") so only the real name is used |
 | `--step-pattern` | `^[A-Za-z]{1,10}\d+[A-Za-z0-9]*$` | Regex a first-column cell must match to count as a step |
-| `--table-strategy` | `lines` | Use `text` when the table in PDF 1 has no ruling lines |
+| `--pages` | | PDF page numbers of the table in PDF 1, e.g. `3-7` or `3,5,8-9` |
+| `--table-strategy` | `auto` | How tables in PDF 1 are detected: `lines` (ruling lines), `text` (alignment) or `auto` (both) |
 
 Example with a custom layout:
 

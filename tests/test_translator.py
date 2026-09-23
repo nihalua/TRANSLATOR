@@ -149,3 +149,65 @@ def test_custom_layout(pdfs, tmp_path):
     ws = load_workbook(out).active
     assert ws["C3"].value == "Name" and ws["E3"].value == "No."
     assert ws["C6"].value == "S01" and ws["E6"].value == "201 OR 202 OR 203"
+
+
+def make_borderless_pdf(path):
+    """Table without ruling lines, cells like "T00 Start", spanning two pages with a page header."""
+    c = canvas.Canvas(str(path), pagesize=A4)
+    c.drawString(72, 800, "Contents")
+    c.drawString(72, 780, "3.1 Sequence steps ........ 2")
+    c.showPage()
+
+    def header():
+        c.drawString(72, 815, "2024 Electrolyser specification")
+
+    header()
+    c.drawString(72, 740, "3.1 Sequence steps")
+    y = 710
+    rows = [("Step", "Description")] + [(f"T0{i} Start", f"Task {i}") for i in range(3)] + \
+           [(f"S{i:02d}", f"Step {i}") for i in range(1, 30)]
+    for name, desc in rows:
+        if y < 80:
+            c.showPage()
+            header()
+            y = 760
+        c.drawString(72, y, name)
+        c.drawString(250, y, desc)
+        y -= 22
+    c.drawString(72, y - 20, "3.2 Other section")
+    c.drawString(72, y - 50, "Z99")
+    c.drawString(250, y - 50, "not in 3.1")
+    c.showPage()
+    c.save()
+
+
+def test_borderless_table_spanning_pages(tmp_path):
+    p1 = tmp_path / "borderless.pdf"
+    make_borderless_pdf(p1)
+    expected = ["T00", "T01", "T02"] + [f"S{i:02d}" for i in range(1, 30)]
+    assert extract_step_names(str(p1), "3.1") == expected
+    assert extract_step_names(str(p1), "3.1", pages=[2, 3]) == expected
+    # Page range only (no section): everything on those pages.
+    assert extract_step_names(str(p1), pages=[2, 3]) == expected + ["Z99"]
+
+
+def test_page_range_with_table(pdfs):
+    assert extract_step_names(str(pdfs[0]), pages=[3]) == ["T00", "T01", "S01", "S02", "Z99"]
+    assert extract_step_names(str(pdfs[0]), "3.1", pages=[3]) == ["T00", "T01", "S01", "S02"]
+
+
+def test_parse_page_range():
+    from translator.pdf_steps import parse_page_range
+
+    assert parse_page_range("3-7") == [3, 4, 5, 6, 7]
+    assert parse_page_range("3, 5, 8-9") == [3, 5, 8, 9]
+    with pytest.raises(ValueError):
+        parse_page_range("7-3")
+
+
+def test_no_steps_reports_cells(pdfs):
+    from translator.pdf_steps import StepsNotFoundError
+
+    with pytest.raises(StepsNotFoundError) as err:
+        extract_step_names(str(pdfs[0]), "3.1", step_pattern=r"^Q\d+$")
+    assert "'T00'" in str(err.value)

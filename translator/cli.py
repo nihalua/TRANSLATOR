@@ -11,7 +11,7 @@ import sys
 
 from .excel_writer import write_mapping
 from .pdf_numbers import DEFAULT_NUMBER_LABEL, find_step_numbers
-from .pdf_steps import DEFAULT_STEP_PATTERN, extract_step_names
+from .pdf_steps import DEFAULT_STEP_PATTERN, extract_step_names, parse_page_range
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,6 +22,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--gui", action="store_true", help="open the graphical interface")
     p.add_argument("--pdf1", help="PDF containing the table with the step names")
     p.add_argument("--section", help='section number of the table in PDF 1, e.g. "3.1"')
+    p.add_argument("--pages", help='PDF page numbers of the table in PDF 1, e.g. "3-7" '
+                                   "(as shown by the PDF viewer)")
     p.add_argument("--pdf2", help="PDF containing the step properties with the 'number:' field")
     p.add_argument("--output", "-o", help="Excel file to create, e.g. mapping.xlsx")
 
@@ -29,8 +31,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--step-pattern", default=DEFAULT_STEP_PATTERN,
                    help="regex a first-column cell must match to count as a step name "
                         "(default: %(default)s)")
-    g.add_argument("--table-strategy", choices=["lines", "text"], default="lines",
-                   help="use 'text' if the table in PDF 1 has no ruling lines")
+    g.add_argument("--table-strategy", choices=["auto", "lines", "text"], default="auto",
+                   help="how tables in PDF 1 are detected: ruling 'lines', 'text' alignment, "
+                        "or 'auto' (try both) (default: %(default)s)")
     g.add_argument("--number-label", default=DEFAULT_NUMBER_LABEL,
                    help="label of the number field in PDF 2 (default: %(default)s)")
     g.add_argument("--name-label", default=None,
@@ -56,8 +59,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace, log=print) -> int:
-    log(f"Reading step names from section {args.section} of {args.pdf1} ...")
-    steps = extract_step_names(args.pdf1, args.section, args.step_pattern, args.table_strategy)
+    pages = parse_page_range(args.pages) if args.pages else None
+    where = " and ".join(filter(None, [
+        f"section {args.section}" if args.section else "",
+        f"pages {args.pages}" if args.pages else "",
+    ]))
+    log(f"Reading step names from {where} of {args.pdf1} ...")
+    steps = extract_step_names(args.pdf1, args.section, args.step_pattern, args.table_strategy,
+                               pages=pages, log=log)
     log(f"  {len(steps)} step(s) found: {', '.join(steps)}")
 
     log(f"Searching {args.pdf2} for '{args.number_label}' values ...")
@@ -93,11 +102,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.gui or not any([args.pdf1, args.pdf2, args.section, args.output]):
+    if args.gui or not any([args.pdf1, args.pdf2, args.section, args.pages, args.output]):
         from .gui import launch
         return launch(parser)
 
-    missing = [n for n in ("pdf1", "section", "pdf2", "output") if not getattr(args, n)]
+    missing = [n for n in ("pdf1", "pdf2", "output") if not getattr(args, n)]
+    if not args.section and not args.pages:
+        missing.append("section (or --pages)")
     if missing:
         parser.error("missing required option(s): " + ", ".join("--" + m for m in missing))
     try:
