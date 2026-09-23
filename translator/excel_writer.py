@@ -47,12 +47,14 @@ def write_mapping(
     separator: str = "OR",
     not_found_text: str = "",
     sort: bool = True,
+    checks: list[str] | None = None,
 ) -> None:
     """Create `output_path` with one row per step (alphabetical when `sort`).
 
     `step_number_column` receives the digits of the step name (T10 -> 10).
     Headers are written on `start_row` (unless both headers are None) and the data
     starts on the row below. Steps without a number are highlighted in yellow.
+    `checks` (points for a human to verify) are listed on a separate "Check" sheet.
     """
     wb = Workbook()
     ws = wb.active
@@ -94,5 +96,13 @@ def write_mapping(
     for col, width in ((step_col, 15), (step_no_col, 10), (number_col, 40), (pages_col, 15)):
         if col:
             ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = width
+
+    if checks:
+        check = wb.create_sheet("Check")
+        check.cell(row=1, column=1, value="Please verify").font = Font(bold=True)
+        for i, text in enumerate(checks, start=2):
+            check.cell(row=i, column=1, value=text)
+        check.column_dimensions["A"].width = 110
+        check.sheet_properties.tabColor = "FF0000"
 
     wb.save(output_path)

@@ -283,3 +283,72 @@ def test_sequence_chart_layout(tmp_path):
     expected = ["T00", "S02", "T02", "S05", "S07", "T05", "S09"]
     assert extract_step_names(str(p1), "3.1") == expected
     assert extract_step_names(str(p1), "3.1", pages=[1, 2]) == expected
+
+
+def make_edge_pdf(path, extra_in_column: str | None = None):
+    """Framed-block layout with a step name at the very bottom of a page (like T70),
+    one at the very top of the next page, and a repeating step-like page header."""
+    c = canvas.Canvas(str(path), pagesize=A4)
+    width, height = A4
+
+    def furniture(page_no):
+        c.drawString(72, height - 25, "EL2024")              # header, left, step-like
+        c.drawString(72, 20, f"DOC7 page {page_no}")         # footer, left, step-like
+
+    furniture(1)
+    c.drawString(60, 780, "3.1 Sequence")
+    y = 750
+    for name in ["T00", "S02", "T02", "S05"]:
+        c.rect(60, y - 60, 50, 60)
+        c.rect(110, y - 60, 400, 60)
+        c.drawString(72, y - 14, name)
+        c.drawString(120, y - 14, "check S03 and XV101")
+        y -= 75
+    if extra_in_column:
+        c.drawString(72, y - 14, extra_in_column)
+    # T70 in the bottom 7% of the page, just above the footer
+    c.rect(60, 38, 450, 18)
+    c.drawString(72, 42, "T70")
+    c.drawString(120, 42, "& Empty transition")
+    c.showPage()
+
+    furniture(2)
+    # S75 at the very top of the next page
+    c.drawString(72, height - 45, "S75")
+    c.drawString(120, height - 45, "MESSAGE")
+    c.drawString(60, height - 120, "3.2 Next section")
+    c.drawString(72, height - 150, "Z99")
+    c.showPage()
+    furniture(3)
+    c.drawString(72, 700, "Other text")
+    c.showPage()
+    c.save()
+
+
+def test_steps_at_page_edges_are_kept(tmp_path):
+    p1 = tmp_path / "edges.pdf"
+    make_edge_pdf(p1)
+    warnings = []
+    steps = extract_step_names(str(p1), "3.1", warnings=warnings)
+    assert steps == ["T00", "S02", "T02", "S05", "T70", "S75"]
+    # Only the step-like page header/footer is mentioned, once each.
+    assert len(warnings) == 2
+    assert all("page header/footer" in w for w in warnings)
+    assert extract_step_names(str(p1), pages=[1, 2]) == ["T00", "S02", "T02", "S05", "T70", "S75", "Z99"]
+
+
+def test_unexpected_text_in_step_column_is_reported(tmp_path, pdfs):
+    p1 = tmp_path / "edges.pdf"
+    make_edge_pdf(p1, extra_in_column="T 60")
+    warnings = []
+    steps = extract_step_names(str(p1), "3.1", warnings=warnings)
+    assert "T70" in steps
+    assert any("'T'" in w for w in warnings) and any("'60'" in w for w in warnings)
+
+    out = tmp_path / "mapping.xlsx"
+    main(["--pdf1", str(p1), "--section", "3.1", "--pdf2", str(pdfs[1]), "--output", str(out)])
+    wb = load_workbook(out)
+    assert "Check" in wb.sheetnames
+    texts = [c.value for c in wb["Check"]["A"]]
+    assert any("'60'" in (t or "") for t in texts)
+    assert any("No number found" in (t or "") for t in texts)

@@ -98,19 +98,47 @@ def _find_in_outline(pdf_path: str, section: str) -> int | None:
 class _Page:
     """Text lines and tables of one page, computed once."""
 
-    # Lines this close to the top/bottom edge are page headers/footers, not section headings.
+    # Lines this close to the top/bottom edge are never taken as section headings
+    # (page numbers such as "3 of 20" look like headings). Step names are NOT
+    # filtered by this margin; see is_repeated().
     MARGIN = 0.07
+    # How far (in points) text may move between pages and still be the same header.
+    REPEAT_TOLERANCE = 6
+    # Pages before/after compared to recognise headers and footers.
+    NEIGHBOURS = 2
 
-    def __init__(self, page):
+    def __init__(self, page, index: int, get, n_pages: int):
         self.page = page
+        self.index = index
+        self._get = get
+        self._n = n_pages
         self.lines = page.extract_text_lines()
         self._tables: dict[str, list] = {}
         self._words = None
+        self._tops: dict[str, list[float]] | None = None
 
     def words(self) -> list[dict]:
         if self._words is None:
             self._words = self.page.extract_words()
         return self._words
+
+    def _word_tops(self) -> dict[str, list[float]]:
+        if self._tops is None:
+            self._tops = {}
+            for w in self.words():
+                self._tops.setdefault(w["text"].strip(_TRIM), []).append(w["top"])
+        return self._tops
+
+    def is_repeated(self, text: str, top: float) -> bool:
+        """True for page headers/footers: the same text at the same height on a
+        neighbouring page. A step name is unique, so it is never removed this way."""
+        for j in range(self.index - self.NEIGHBOURS, self.index + self.NEIGHBOURS + 1):
+            if j == self.index or not 0 <= j < self._n:
+                continue
+            tops = self._get(j)._word_tops().get(text, [])
+            if any(abs(t - top) <= self.REPEAT_TOLERANCE for t in tops):
+                return True
+        return False
 
     def in_margin(self, top: float) -> bool:
         height = float(self.page.height)
@@ -150,13 +178,13 @@ class _Page:
 
 def _regions(pdf, pdf_path, section, pages, log):
     cache: dict[int, _Page] = {}
+    n = len(pdf.pages)
 
     def get(i):
         if i not in cache:
-            cache[i] = _Page(pdf.pages[i])
+            cache[i] = _Page(pdf.pages[i], i, get, n)
         return cache[i]
 
-    n = len(pdf.pages)
     if pages:
         bad = [p for p in pages if p > n]
         if bad:
@@ -235,13 +263,19 @@ def extract_step_names(
     table_strategy: str = "auto",
     pages: list[int] | None = None,
     log=lambda message: None,
+    warnings: list[str] | None = None,
 ) -> list[str]:
     """Return the step names from the first column of the table.
 
     The table is located by `section` (e.g. "3.1"), by `pages` (1-based page
     numbers), or both. Cells in the first column that do not match `step_pattern`
     (headers, blanks) are skipped. Duplicates are removed, order is kept.
+
+    Anything that may need a human look (text in the step-name column that is not
+    a step name, step-like words that were skipped) is appended to `warnings`.
     """
+    if warnings is None:
+        warnings = []
     regex = re.compile(step_pattern)
     if table_strategy == "auto":
         strategies = ["position", "lines", "text"]
@@ -253,9 +287,9 @@ def extract_step_names(
         diagnostics: list[str] = []
         for strategy in strategies:
             if strategy == "position":
-                steps = _steps_by_position(regions, get, regex, log)
+                steps = _steps_by_position(regions, get, regex, log, warnings)
             else:
-                steps = _steps_from_tables(regions, get, strategy, regex, diagnostics)
+                steps = _steps_from_tables(regions, get, strategy, regex, diagnostics, warnings)
             if steps:
                 return steps
 
@@ -280,33 +314,38 @@ def extract_step_names(
     )
 
 
-def _steps_by_position(regions, get, regex, log) -> list[str]:
+def _steps_by_position(regions, get, regex, log, warnings) -> list[str]:
     """Step names are the words in the leftmost column that match the pattern.
 
     Works for "tables" that are really framed blocks (one block per step, the name
     in a box on the left), where no regular rows and columns can be detected.
     """
     found = []  # (page_index, top, x0, x1, name)
+    furniture = []  # step-like words skipped as page header/footer
     for region in regions:
         page = get(region.page_index)
         for w in page.words():
-            if page.in_margin(w["top"]) or not (region.top - 1 <= w["top"] < region.bottom):
+            if not (region.top - 1 <= w["top"] < region.bottom):
                 continue
             name = w["text"].strip(_TRIM)
             if name and regex.match(name):
-                found.append((region.page_index, w["top"], w["x0"], w["x1"], name))
+                entry = (region.page_index, w["top"], w["x0"], w["x1"], name)
+                (furniture if page.is_repeated(name, w["top"]) else found).append(entry)
     if not found:
         return []
 
     # Group the words into vertical columns: a word belongs to a column when its
     # centre lies within the column's first (leftmost) word, or the other way round,
     # so centred names of different lengths still line up.
+    def same_column(word, first):
+        centre = (word[2] + word[3]) / 2
+        x0, x1 = first[2], first[3]
+        return x0 <= centre <= x1 or word[2] <= (x0 + x1) / 2 <= word[3]
+
     columns: list[list] = []
     for word in sorted(found, key=lambda w: w[2]):
-        centre = (word[2] + word[3]) / 2
         for col in columns:
-            x0, x1 = col[0][2], col[0][3]
-            if x0 <= centre <= x1 or word[2] <= (x0 + x1) / 2 <= word[3]:
+            if same_column(word, col[0]):
                 col.append(word)
                 break
         else:
@@ -315,15 +354,60 @@ def _steps_by_position(regions, get, regex, log) -> list[str]:
     # Leftmost column holding at least two names (a stray word left of the table
     # is ignored); a single name only counts when nothing else was found.
     column = next((c for c in columns if len(c) >= 2), columns[0])
+    column.sort(key=lambda w: (w[0], w[1]))
     steps: list[str] = []
-    for _, _, _, _, name in sorted(column, key=lambda w: (w[0], w[1])):
+    per_page: dict[int, list[str]] = {}
+    for page_index, _, _, _, name in column:
         if name not in steps:
             steps.append(name)
-    log(f"  Step names read from the left-hand column ({len(steps)} found).")
+            per_page.setdefault(page_index, []).append(name)
+    log(f"  Step names read from the left-hand column ({len(steps)} found):")
+    for page_index, names in per_page.items():
+        log(f"    page {page_index + 1}: {', '.join(names)}")
+
+    # --- Safety checks: never drop something silently. ---
+    col_x0 = min(w[2] for w in column)
+    col_x1 = max(w[3] for w in column)
+    seen: set[str] = set()
+
+    def warn(message: str):
+        if message not in seen and len(seen) < 100:
+            seen.add(message)
+            warnings.append(message)
+
+    skipped: dict[str, list[int]] = {}
+    for word in furniture:
+        if col_x0 - 5 <= (word[2] + word[3]) / 2 <= col_x1 + 5:
+            skipped.setdefault(word[4], [])
+            if word[0] + 1 not in skipped[word[4]]:
+                skipped[word[4]].append(word[0] + 1)
+    for text, page_numbers in skipped.items():
+        warn(f"PDF 1: '{text}' was skipped as a page header/footer (same text at the same "
+             f"place on neighbouring pages; seen on page(s) {', '.join(map(str, page_numbers))}).")
+
+    taken = {(w[0], round(w[1], 1), w[4]) for w in column}
+    for region in regions:
+        page = get(region.page_index)
+        for w in page.words():
+            top = w["top"]
+            if not (region.top - 1 <= top < region.bottom):
+                continue
+            if abs(top - region.top) < 3 and region is regions[0]:
+                continue  # the section heading itself
+            centre = (w["x0"] + w["x1"]) / 2
+            if not (col_x0 - 5 <= centre <= col_x1 + 5):
+                continue
+            text = w["text"].strip(_TRIM)
+            if not text or (region.page_index, round(top, 1), text) in taken:
+                continue
+            if page.is_repeated(text, top):
+                continue  # page header/footer text (step-like ones are reported above)
+            warn(f"PDF 1 page {region.page_index + 1}: '{w['text']}' is in the step-name "
+                 "column but was not taken as a step name.")
     return steps
 
 
-def _steps_from_tables(regions, get, strategy, regex, diagnostics) -> list[str]:
+def _steps_from_tables(regions, get, strategy, regex, diagnostics, warnings) -> list[str]:
     steps: list[str] = []
     for region in regions:
         page = get(region.page_index)
@@ -331,9 +415,13 @@ def _steps_from_tables(regions, get, strategy, regex, diagnostics) -> list[str]:
             for row_box, row in zip(table.rows, table.extract()):
                 # Only rows inside the section (the table may start above the heading).
                 top = row_box.bbox[1]
-                if not row or page.in_margin(top) or not (region.top - 1 <= top < region.bottom):
+                if not row or not (region.top - 1 <= top < region.bottom):
                     continue
                 step = _step_from_cell(row[0], regex)
+                if step and page.is_repeated(step, top):
+                    warnings.append(f"PDF 1 page {region.page_index + 1}: '{step}' was skipped as "
+                                    "a page header/footer (same text on a neighbouring page).")
+                    continue
                 if step:
                     if step not in steps:
                         steps.append(step)

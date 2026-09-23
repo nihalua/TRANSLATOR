@@ -77,9 +77,12 @@ def run(args: argparse.Namespace, log=print) -> int:
         f"pages {args.pages}" if args.pages else "",
     ]))
     log(f"Reading step names from {where} of {args.pdf1} ...")
+    warnings: list[str] = []
     steps = extract_step_names(args.pdf1, args.section, args.step_pattern, args.table_strategy,
-                               pages=pages, log=log)
+                               pages=pages, log=log, warnings=warnings)
     log(f"  {len(steps)} step(s) found: {', '.join(steps)}")
+    for w in warnings:
+        log(f"  CHECK: {w}")
 
     pdf2_pages = parse_page_range(args.pdf2_pages) if args.pdf2_pages else None
     in_pages = f" (pages {args.pdf2_pages})" if args.pdf2_pages else ""
@@ -95,6 +98,7 @@ def run(args: argparse.Namespace, log=print) -> int:
             log(f"  {r.step}: {f' {args.separator} '.join(r.numbers)}  (as {variants})")
     if missing:
         log(f"  WARNING: no number found for {len(missing)} step(s): {', '.join(missing)}")
+        warnings.append(f"No number found in PDF 2 for: {', '.join(missing)}")
 
     write_mapping(
         args.output,
@@ -111,8 +115,13 @@ def run(args: argparse.Namespace, log=print) -> int:
         separator=args.separator,
         not_found_text=args.not_found,
         sort=not args.no_sort,
+        checks=warnings,
     )
     log(f"Excel file written: {args.output}")
+    if warnings:
+        log(f"{len(warnings)} point(s) to check are listed above and on the 'Check' sheet.")
+    else:
+        log("Nothing to check: every text in the step-name column was taken as a step name.")
     return 0
 
 

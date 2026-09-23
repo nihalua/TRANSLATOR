@@ -20,7 +20,14 @@ Creates a new Excel file that maps each **step name** (from a table in PDF 1) to
    The step names are first taken from their position: the leftmost column of
    step-like words (this also works for "tables" that are really framed blocks, one
    per step, with the name in a box on the left). If that gives nothing, tables with
-   and without ruling lines are tried, and finally the first word of each text line. When no step is found the program stops and
+   and without ruling lines are tried, and finally the first word of each text line.
+   Page headers/footers are recognised because they repeat at the same place on the
+   neighbouring pages, so a step name right at the top or bottom of a page is kept.
+4. **Safety check.** Nothing is dropped silently: any other text found in the
+   step-name column (e.g. a name split as `T 60`) and any step-like word skipped as a
+   header/footer is listed in the log and on a red **Check** sheet in the Excel file,
+   together with the steps that got no number. If the Check sheet is missing, there
+   was nothing to verify. When no step is found the program stops and
    shows the first-column cells it did read, so the problem is easy to spot.
 2. **PDF 2 – step numbers.** Every `number:` field is assigned to the closest step
    name written before it on the same page. Variants such as `S01_1`, `S01_2`, … are
