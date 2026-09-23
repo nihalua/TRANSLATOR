@@ -3,10 +3,10 @@
 Creates a new Excel file that maps each **step name** (from a table in PDF 1) to its
 **step number(s)** (from the `number:` field in PDF 2).
 
-| Step | Number            |
-| ---- | ----------------- |
-| T00  | 100               |
-| S01  | 201 OR 202 OR 203 |
+| Step | Step no. | Number            |
+| ---- | -------- | ----------------- |
+| S01  | 1        | 201 OR 202 OR 203 |
+| T10  | 10       | 100               |
 
 ## How it works
 
@@ -25,8 +25,9 @@ Creates a new Excel file that maps each **step name** (from a table in PDF 1) to
 2. **PDF 2 – step numbers.** Every `number:` field is assigned to the closest step
    name written before it on the same page. Variants such as `S01_1`, `S01_2`, … are
    matched to `S01` (but `S010` is not).
-3. **Excel.** One row per step. Several numbers go into the same cell separated by
-   `OR`. Steps without a number are highlighted in yellow and listed in the console.
+3. **Excel.** One row per step, sorted alphabetically (S02 before S10). Column B
+   holds the number inside the step name (T10 → 10). Several numbers go into the
+   same cell separated by `OR`. Steps without a number are highlighted in yellow and listed in the console.
 
 ## Windows exe (no Python needed)
 
@@ -64,10 +65,13 @@ python -m translator --pdf1 spec.pdf --pages 3-7 --pdf2 steps.pdf --output mappi
 
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
+| `--pdf2-pages` | all | PDF page numbers to search in PDF 2, e.g. `100-250` |
 | `--step-column` | `A` | Excel column for the step names |
-| `--number-column` | `B` | Excel column for the numbers |
+| `--step-number-column` | `B` | Excel column for the number inside the step name (T10 → 10); `""` leaves it out |
+| `--number-column` | `C` | Excel column for the numbers from PDF 2 |
+| `--no-sort` | | Keep the order of PDF 1 instead of sorting alphabetically |
 | `--start-row` | `1` | Row of the header; data starts on the row below |
-| `--step-header` / `--number-header` | `Step` / `Number` | Header texts |
+| `--step-header` / `--step-number-header` / `--number-header` | `Step` / `Step no.` / `Number` | Header texts |
 | `--no-header` | | Do not write a header row |
 | `--sheet` | `Mapping` | Sheet name |
 | `--pages-column` | | Extra column listing the PDF 2 pages each number was read from (handy for checking) |
@@ -83,7 +87,7 @@ Example with a custom layout:
 
 ```bash
 python -m translator --pdf1 spec.pdf --section 3.1 --pdf2 steps.pdf -o mapping.xlsx \
-    --step-column C --number-column D --start-row 2 --name-label "name:" --pages-column E
+    --pdf2-pages 100-250 --start-row 2 --name-label "name:" --pages-column D
 ```
 
 ## Development

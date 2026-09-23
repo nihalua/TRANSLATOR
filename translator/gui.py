@@ -40,19 +40,25 @@ def launch(parser: argparse.ArgumentParser) -> int:
     add_row(1, "Section of the table (e.g. 3.1)", "section")
     add_row(2, "Pages of the table (e.g. 3-7)", "pages")
     add_row(3, "PDF 2 (step numbers)", "pdf2", browse=open_pdf)
-    add_row(4, "Output Excel file", "output", browse=save_xlsx)
-    add_row(5, "Step column", "step_column", "A")
-    add_row(6, "Number column", "number_column", "B")
-    add_row(7, "Header row", "start_row", "1")
-    add_row(8, "Step header", "step_header", "Step")
-    add_row(9, "Number header", "number_header", "Number")
-    add_row(10, "Name label in PDF 2 (optional, e.g. name:)", "name_label")
-    add_row(11, "Pages column (optional, e.g. C)", "pages_column")
-    tk.Label(root, text="Fill in the section, the pages, or both.", fg="gray").grid(
-        row=12, column=1, sticky="w", padx=6)
+    add_row(4, "Pages to search in PDF 2 (optional)", "pdf2_pages")
+    add_row(5, "Output Excel file", "output", browse=save_xlsx)
+    add_row(6, "Step column", "step_column", "A")
+    add_row(7, "Step no. column (T10 -> 10)", "step_number_column", "B")
+    add_row(8, "Number column", "number_column", "C")
+    add_row(9, "Header row", "start_row", "1")
+    add_row(10, "Step header", "step_header", "Step")
+    add_row(11, "Step no. header", "step_number_header", "Step no.")
+    add_row(12, "Number header", "number_header", "Number")
+    add_row(13, "Name label in PDF 2 (optional, e.g. name:)", "name_label")
+    add_row(14, "Pages column (optional, e.g. D)", "pages_column")
+    sort_var = tk.BooleanVar(value=True)
+    tk.Checkbutton(root, text="Sort steps alphabetically", variable=sort_var).grid(
+        row=15, column=1, sticky="w", padx=6)
+    tk.Label(root, text="PDF 1: fill in the section, the pages, or both.", fg="gray").grid(
+        row=16, column=1, sticky="w", padx=6)
 
     log = scrolledtext.ScrolledText(root, width=90, height=15, state="disabled")
-    log.grid(row=14, column=0, columnspan=3, padx=6, pady=6)
+    log.grid(row=18, column=0, columnspan=3, padx=6, pady=6)
 
     def write_log(message: str):
         def append():
@@ -74,10 +80,16 @@ def launch(parser: argparse.ArgumentParser) -> int:
         argv = ["--pdf1", values["pdf1"],
                 "--pdf2", values["pdf2"], "--output", values["output"],
                 "--step-column", values["step_column"] or "A",
-                "--number-column", values["number_column"] or "B",
+                "--step-number-column", values["step_number_column"],
+                "--number-column", values["number_column"] or "C",
                 "--start-row", values["start_row"] or "1",
                 "--step-header", values["step_header"],
+                "--step-number-header", values["step_number_header"],
                 "--number-header", values["number_header"]]
+        if not sort_var.get():
+            argv.append("--no-sort")
+        if values["pdf2_pages"]:
+            argv += ["--pdf2-pages", values["pdf2_pages"]]
         if values["section"]:
             argv += ["--section", values["section"]]
         if values["pages"]:
@@ -99,6 +111,6 @@ def launch(parser: argparse.ArgumentParser) -> int:
 
         threading.Thread(target=work, daemon=True).start()
 
-    tk.Button(root, text="Create Excel", command=start).grid(row=13, column=1, pady=6)
+    tk.Button(root, text="Create Excel", command=start).grid(row=17, column=1, pady=6)
     root.mainloop()
     return 0

@@ -71,13 +71,15 @@ def find_step_numbers(
     steps: list[str],
     number_label: str = DEFAULT_NUMBER_LABEL,
     name_label: str | None = None,
+    pages: list[int] | None = None,
 ) -> dict[str, StepResult]:
     """Return {step: StepResult} with every "number:" value found for each step.
 
     A "number:" field is attributed to the closest step name (or variant) written
     before it on the same page. If `name_label` is given (e.g. "name:"), only step
     names written after that label are taken into account, which is more precise
-    when the property pages also mention other steps.
+    when the property pages also mention other steps. `pages` (1-based) limits the
+    search to those pages.
     """
     results = {s: StepResult(s) for s in steps}
     if not steps:
@@ -88,7 +90,13 @@ def find_step_numbers(
     name_re = _label_regex(name_label) if name_label else None
 
     with pdfplumber.open(pdf_path) as pdf:
-        for page_no, page in enumerate(pdf.pages, start=1):
+        n = len(pdf.pages)
+        if pages:
+            bad = [p for p in pages if p > n]
+            if bad:
+                raise ValueError(f"PDF 2 has only {n} pages (asked for page {bad[0]})")
+        for page_no in pages or range(1, n + 1):
+            page = pdf.pages[page_no - 1]
             text = page.extract_text() or ""
             if not number_re.search(text):
                 continue

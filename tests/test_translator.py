@@ -131,13 +131,13 @@ def test_end_to_end_excel(pdfs, tmp_path):
                "--output", str(out)])
     assert rc == 0
     ws = load_workbook(out).active
-    rows = [tuple(c.value for c in r) for r in ws.iter_rows(min_row=1, max_col=2)]
+    rows = [tuple(c.value for c in r) for r in ws.iter_rows(min_row=1, max_col=3)]
     assert rows == [
-        ("Step", "Number"),
-        ("T00", 100),
-        ("T01", 101),
-        ("S01", "201 OR 202 OR 203"),
-        ("S02", 300),
+        ("Step", "Step no.", "Number"),
+        ("S01", 1, "201 OR 202 OR 203"),
+        ("S02", 2, 300),
+        ("T00", 0, 100),
+        ("T01", 1, 101),
     ]
 
 
@@ -148,7 +148,31 @@ def test_custom_layout(pdfs, tmp_path):
           "--start-row", "3", "--step-header", "Name", "--number-header", "No."])
     ws = load_workbook(out).active
     assert ws["C3"].value == "Name" and ws["E3"].value == "No."
-    assert ws["C6"].value == "S01" and ws["E6"].value == "201 OR 202 OR 203"
+    assert ws["C4"].value == "S01" and ws["E4"].value == "201 OR 202 OR 203"
+
+
+def test_document_order_and_pdf2_pages(pdfs, tmp_path):
+    out = tmp_path / "mapping.xlsx"
+    main(["--pdf1", str(pdfs[0]), "--section", "3.1", "--pdf2", str(pdfs[1]),
+          "--pdf2-pages", "1-3", "--output", str(out), "--no-sort", "--step-number-column", ""])
+    ws = load_workbook(out).active
+    rows = [tuple(c.value for c in r) for r in ws.iter_rows(min_row=1, max_col=3)]
+    # Pages 4-7 are not searched: S01 keeps only the number from page 3, S02 has none.
+    assert rows == [
+        ("Step", None, "Number"),
+        ("T00", None, 100),
+        ("T01", None, 101),
+        ("S01", None, 201),
+        ("S02", None, None),
+    ]
+
+
+def test_natural_sort():
+    from translator.excel_writer import natural_key, step_digits
+
+    assert sorted(["T10", "S10", "T0", "S02", "J30", "T2"], key=natural_key) == \
+        ["J30", "S02", "S10", "T0", "T2", "T10"]
+    assert step_digits("T00") == 0 and step_digits("S02") == 2 and step_digits("T45") == 45
 
 
 def make_borderless_pdf(path):
