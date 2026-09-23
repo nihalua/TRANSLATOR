@@ -211,3 +211,51 @@ def test_no_steps_reports_cells(pdfs):
     with pytest.raises(StepsNotFoundError) as err:
         extract_step_names(str(pdfs[0]), "3.1", step_pattern=r"^Q\d+$")
     assert "'T00'" in str(err.value)
+
+
+def make_sequence_chart_pdf(path):
+    """Layout like a sequence description: one framed block per step, the step name in a
+    small box on the left, free text (with step-like words) in a big box on the right."""
+    c = canvas.Canvas(str(path), pagesize=A4)
+    width, height = A4
+
+    def page_header():
+        c.drawString(72, height - 30, "EL2024 Sequence description")  # step-like, in margin
+
+    page_header()
+    c.drawString(60, 780, "3.1 Sequence")
+    c.drawString(530, 755, "Rev")
+    y = 740
+    blocks = [("T00", "", 10), ("S02", "S", 6), ("T02", "&", 1), ("S05", "S", 3),
+              ("S07", "S", 8), ("T05", "&", 1), ("S09", "S", 4)]
+    for name, symbol, n_lines in blocks:
+        block_h = 20 + n_lines * 16
+        if y - block_h < 70:
+            c.showPage()
+            page_header()
+            y = 780
+        c.rect(60, y - block_h, 50, block_h)              # name column
+        c.rect(110, y - block_h, 20, block_h)             # symbol column
+        c.rect(130, y - block_h, 390, block_h)            # description
+        name_y = y - block_h / 2 if name == "S05" else y - 14  # S05 centred like the screenshot
+        c.drawString(72, name_y, name)
+        c.drawString(115, y - 14, symbol)
+        for i in range(n_lines):
+            text = f"XV10{i} open valve" if i % 2 else f"- check S03 {i}"
+            c.drawString(140, y - 14 - i * 16, text)
+        if name == "T00":
+            c.drawString(140, y - block_h + 4, "Note: P1 must be running")
+        y -= block_h + 15
+    c.drawString(60, y - 20, "3.2 Next section")
+    c.rect(60, y - 60, 50, 25)
+    c.drawString(72, y - 52, "Z99")
+    c.showPage()
+    c.save()
+
+
+def test_sequence_chart_layout(tmp_path):
+    p1 = tmp_path / "chart.pdf"
+    make_sequence_chart_pdf(p1)
+    expected = ["T00", "S02", "T02", "S05", "S07", "T05", "S09"]
+    assert extract_step_names(str(p1), "3.1") == expected
+    assert extract_step_names(str(p1), "3.1", pages=[1, 2]) == expected

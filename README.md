@@ -17,8 +17,10 @@ Creates a new Excel file that maps each **step name** (from a table in PDF 1) to
    runs until the next heading that is not a sub-section. Only the **first column**
    of the tables in that part is used; cells that do not look like a step name
    (header text such as "Step", empty cells) are skipped, and `T00 Start` gives `T00`.
-   Tables with and without ruling lines are tried; if no table can be read, the first
-   word of each text line is used. When no step is found the program stops and
+   The step names are first taken from their position: the leftmost column of
+   step-like words (this also works for "tables" that are really framed blocks, one
+   per step, with the name in a box on the left). If that gives nothing, tables with
+   and without ruling lines are tried, and finally the first word of each text line. When no step is found the program stops and
    shows the first-column cells it did read, so the problem is easy to spot.
 2. **PDF 2 – step numbers.** Every `number:` field is assigned to the closest step
    name written before it on the same page. Variants such as `S01_1`, `S01_2`, … are
@@ -75,7 +77,7 @@ python -m translator --pdf1 spec.pdf --pages 3-7 --pdf2 steps.pdf --output mappi
 | `--name-label` | | Label of the step name field in PDF 2 (e.g. `name:`). Use it if the property pages also mention other steps (e.g. "previous: S01") so only the real name is used |
 | `--step-pattern` | `^[A-Za-z]{1,10}\d+[A-Za-z0-9]*$` | Regex a first-column cell must match to count as a step |
 | `--pages` | | PDF page numbers of the table in PDF 1, e.g. `3-7` or `3,5,8-9` |
-| `--table-strategy` | `auto` | How tables in PDF 1 are detected: `lines` (ruling lines), `text` (alignment) or `auto` (both) |
+| `--table-strategy` | `auto` | How step names in PDF 1 are read: `position` (leftmost column), `lines` (table with ruling lines), `text` (table by alignment) or `auto` (in that order) |
 
 Example with a custom layout:
 

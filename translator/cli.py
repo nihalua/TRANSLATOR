@@ -31,9 +31,11 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--step-pattern", default=DEFAULT_STEP_PATTERN,
                    help="regex a first-column cell must match to count as a step name "
                         "(default: %(default)s)")
-    g.add_argument("--table-strategy", choices=["auto", "lines", "text"], default="auto",
-                   help="how tables in PDF 1 are detected: ruling 'lines', 'text' alignment, "
-                        "or 'auto' (try both) (default: %(default)s)")
+    g.add_argument("--table-strategy", choices=["auto", "position", "lines", "text"],
+                   default="auto",
+                   help="how the step names in PDF 1 are read: 'position' (leftmost column of "
+                        "step-like words), table by ruling 'lines', table by 'text' alignment, "
+                        "or 'auto' (try them in that order) (default: %(default)s)")
     g.add_argument("--number-label", default=DEFAULT_NUMBER_LABEL,
                    help="label of the number field in PDF 2 (default: %(default)s)")
     g.add_argument("--name-label", default=None,

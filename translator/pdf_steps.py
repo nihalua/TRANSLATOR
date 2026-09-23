@@ -105,6 +105,16 @@ class _Page:
         self.page = page
         self.lines = page.extract_text_lines()
         self._tables: dict[str, list] = {}
+        self._words = None
+
+    def words(self) -> list[dict]:
+        if self._words is None:
+            self._words = self.page.extract_words()
+        return self._words
+
+    def in_margin(self, top: float) -> bool:
+        height = float(self.page.height)
+        return not (height * self.MARGIN < top < height * (1 - self.MARGIN))
 
     def tables(self, strategy: str) -> list:
         if strategy not in self._tables:
@@ -122,10 +132,9 @@ class _Page:
 
     def headings(self):
         """(top, number, text) of numbered headings outside tables, headers/footers and TOC."""
-        height = float(self.page.height)
         out = []
         for line in self.lines:
-            if not (height * self.MARGIN < line["top"] < height * (1 - self.MARGIN)):
+            if self.in_margin(line["top"]):
                 continue
             m = _ANY_HEADING.match(line["text"])
             if m and not _TOC_LINE.search(line["text"]) and not self._in_table(line):
@@ -234,13 +243,19 @@ def extract_step_names(
     (headers, blanks) are skipped. Duplicates are removed, order is kept.
     """
     regex = re.compile(step_pattern)
-    strategies = ["lines", "text"] if table_strategy == "auto" else [table_strategy]
+    if table_strategy == "auto":
+        strategies = ["position", "lines", "text"]
+    else:
+        strategies = [table_strategy]
 
     with pdfplumber.open(pdf_path) as pdf:
         regions, get = _regions(pdf, pdf_path, section, pages, log)
         diagnostics: list[str] = []
         for strategy in strategies:
-            steps = _steps_from_tables(regions, get, strategy, regex, diagnostics)
+            if strategy == "position":
+                steps = _steps_by_position(regions, get, regex, log)
+            else:
+                steps = _steps_from_tables(regions, get, strategy, regex, diagnostics)
             if steps:
                 return steps
 
@@ -265,6 +280,49 @@ def extract_step_names(
     )
 
 
+def _steps_by_position(regions, get, regex, log) -> list[str]:
+    """Step names are the words in the leftmost column that match the pattern.
+
+    Works for "tables" that are really framed blocks (one block per step, the name
+    in a box on the left), where no regular rows and columns can be detected.
+    """
+    found = []  # (page_index, top, x0, x1, name)
+    for region in regions:
+        page = get(region.page_index)
+        for w in page.words():
+            if page.in_margin(w["top"]) or not (region.top - 1 <= w["top"] < region.bottom):
+                continue
+            name = w["text"].strip(_TRIM)
+            if name and regex.match(name):
+                found.append((region.page_index, w["top"], w["x0"], w["x1"], name))
+    if not found:
+        return []
+
+    # Group the words into vertical columns: a word belongs to a column when its
+    # centre lies within the column's first (leftmost) word, or the other way round,
+    # so centred names of different lengths still line up.
+    columns: list[list] = []
+    for word in sorted(found, key=lambda w: w[2]):
+        centre = (word[2] + word[3]) / 2
+        for col in columns:
+            x0, x1 = col[0][2], col[0][3]
+            if x0 <= centre <= x1 or word[2] <= (x0 + x1) / 2 <= word[3]:
+                col.append(word)
+                break
+        else:
+            columns.append([word])
+
+    # Leftmost column holding at least two names (a stray word left of the table
+    # is ignored); a single name only counts when nothing else was found.
+    column = next((c for c in columns if len(c) >= 2), columns[0])
+    steps: list[str] = []
+    for _, _, _, _, name in sorted(column, key=lambda w: (w[0], w[1])):
+        if name not in steps:
+            steps.append(name)
+    log(f"  Step names read from the left-hand column ({len(steps)} found).")
+    return steps
+
+
 def _steps_from_tables(regions, get, strategy, regex, diagnostics) -> list[str]:
     steps: list[str] = []
     for region in regions:
@@ -272,7 +330,8 @@ def _steps_from_tables(regions, get, strategy, regex, diagnostics) -> list[str]:
         for table in page.tables(strategy):
             for row_box, row in zip(table.rows, table.extract()):
                 # Only rows inside the section (the table may start above the heading).
-                if not row or not (region.top - 1 <= row_box.bbox[1] < region.bottom):
+                top = row_box.bbox[1]
+                if not row or page.in_margin(top) or not (region.top - 1 <= top < region.bottom):
                     continue
                 step = _step_from_cell(row[0], regex)
                 if step:
