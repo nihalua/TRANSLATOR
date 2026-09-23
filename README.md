@@ -22,7 +22,16 @@ Creates a new Excel file that maps each **step name** (from a table in PDF 1) to
 3. **Excel.** One row per step. Several numbers go into the same cell separated by
    `OR`. Steps without a number are highlighted in yellow and listed in the console.
 
-## Installation
+## Windows exe (no Python needed)
+
+Every push builds `TRANSLATOR.exe` on GitHub:
+
+1. Open the repository on GitHub → **Actions** → **Build Windows exe**.
+2. Click the latest successful run and download **TRANSLATOR-windows** under *Artifacts*.
+3. Unzip it and double-click `TRANSLATOR.exe`. Windows SmartScreen may warn that the
+   app is unrecognised (it is not code-signed): click *More info* → *Run anyway*.
+
+## Installation (Python)
 
 Python 3.9+ is required.
 

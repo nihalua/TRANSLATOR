@@ -45,9 +45,11 @@ def launch(parser: argparse.ArgumentParser) -> int:
     add_row(6, "Header row", "start_row", "1")
     add_row(7, "Step header", "step_header", "Step")
     add_row(8, "Number header", "number_header", "Number")
+    add_row(9, "Name label in PDF 2 (optional, e.g. name:)", "name_label")
+    add_row(10, "Pages column (optional, e.g. C)", "pages_column")
 
     log = scrolledtext.ScrolledText(root, width=90, height=15, state="disabled")
-    log.grid(row=10, column=0, columnspan=3, padx=6, pady=6)
+    log.grid(row=12, column=0, columnspan=3, padx=6, pady=6)
 
     def write_log(message: str):
         def append():
@@ -70,6 +72,10 @@ def launch(parser: argparse.ArgumentParser) -> int:
                 "--start-row", values["start_row"] or "1",
                 "--step-header", values["step_header"],
                 "--number-header", values["number_header"]]
+        if values["name_label"]:
+            argv += ["--name-label", values["name_label"]]
+        if values["pages_column"]:
+            argv += ["--pages-column", values["pages_column"]]
         args = parser.parse_args(argv)
 
         def work():
@@ -77,11 +83,12 @@ def launch(parser: argparse.ArgumentParser) -> int:
                 run(args, log=write_log)
                 root.after(0, lambda: messagebox.showinfo("Done", f"Created {args.output}"))
             except Exception as exc:
-                write_log(f"ERROR: {exc}")
-                root.after(0, lambda: messagebox.showerror("Error", str(exc)))
+                message = str(exc)
+                write_log(f"ERROR: {message}")
+                root.after(0, lambda: messagebox.showerror("Error", message))
 
         threading.Thread(target=work, daemon=True).start()
 
-    tk.Button(root, text="Create Excel", command=start).grid(row=9, column=1, pady=6)
+    tk.Button(root, text="Create Excel", command=start).grid(row=11, column=1, pady=6)
     root.mainloop()
     return 0
