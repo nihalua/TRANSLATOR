@@ -30,6 +30,7 @@ def launch(parser: argparse.ArgumentParser) -> int:
     from tkinter import filedialog, messagebox, scrolledtext
 
     from .cli import Job, run
+    from .excel_writer import DEFAULT_STEP_HEADERS, DEFAULT_TRANSITION_HEADERS
 
     saved = _load_settings()
     root = tk.Tk()
@@ -112,25 +113,36 @@ def launch(parser: argparse.ArgumentParser) -> int:
     opts = tk.LabelFrame(root, text="Excel layout and options", padx=6, pady=4)
     opts.grid(row=1, column=1, sticky="nsew", padx=6, pady=4)
     opt_vars: dict[str, tk.StringVar] = {}
-    saved_opts = saved.get("options", {})
+    saved_opts = dict(saved.get("options", {}))
+    # Header texts of older versions are replaced by the new defaults.
+    for key, old in (("step_number_header", "Step no."), ("number_header", "Number")):
+        if saved_opts.get(key) == old:
+            del saved_opts[key]
     for r, (key, label, default) in enumerate([
-        ("step_column", "Step column", "A"),
+        ("step_column", "Name column", "A"),
         ("step_number_column", "Step no. column (T10 -> 10)", "B"),
-        ("number_column", "Number column", "C"),
-        ("start_row", "Header row", "1"),
-        ("step_header", "Step header", "Step"),
-        ("step_number_header", "Step no. header", "Step no."),
-        ("number_header", "Number header", "Number"),
+        ("number_column", "OPC UA number column", "C"),
+        ("start_row", "First header row", "1"),
+        ("step_header", "Steps table: header A", DEFAULT_STEP_HEADERS[0]),
+        ("step_number_header", "Steps table: header B", DEFAULT_STEP_HEADERS[1]),
+        ("number_header", "Steps table: header C", DEFAULT_STEP_HEADERS[2]),
+        ("transition_header", "Transitions table: header A", DEFAULT_TRANSITION_HEADERS[0]),
+        ("transition_number_header", "Transitions table: header B",
+         DEFAULT_TRANSITION_HEADERS[1]),
+        ("transition_opc_header", "Transitions table: header C", DEFAULT_TRANSITION_HEADERS[2]),
         ("name_label", "Name label in PDF 2 (optional)", ""),
         ("pages_column", "Pages column (optional, e.g. D)", ""),
     ]):
         tk.Label(opts, text=label, anchor="w").grid(row=r, column=0, sticky="w")
         var = tk.StringVar(value=saved_opts.get(key, default))
-        tk.Entry(opts, textvariable=var, width=14).grid(row=r, column=1, padx=4, pady=1)
+        tk.Entry(opts, textvariable=var, width=24).grid(row=r, column=1, padx=4, pady=1)
         opt_vars[key] = var
     sort_var = tk.BooleanVar(value=saved_opts.get("sort", True))
     tk.Checkbutton(opts, text="Sort steps alphabetically", variable=sort_var).grid(
         row=20, column=0, columnspan=2, sticky="w")
+    group_var = tk.BooleanVar(value=saved_opts.get("group", True))
+    tk.Checkbutton(opts, text="Separate tables for steps (S) and transitions (T)",
+                   variable=group_var).grid(row=21, column=0, columnspan=2, sticky="w")
 
     # ------------------------------------------------------------------ log
     log = scrolledtext.ScrolledText(root, width=110, height=12, state="disabled")
@@ -149,7 +161,7 @@ def launch(parser: argparse.ArgumentParser) -> int:
             **{k: v.get().strip() for k, v in file_vars.items()},
             "sequences": [{k: v.get().strip() for k, v in r.items()} for r in rows],
             "options": {**{k: v.get().strip() for k, v in opt_vars.items()},
-                        "sort": sort_var.get()},
+                        "sort": sort_var.get(), "group": group_var.get()},
         }
 
     def start():
@@ -179,9 +191,14 @@ def launch(parser: argparse.ArgumentParser) -> int:
                 "--start-row", o["start_row"] or "1",
                 "--step-header", o["step_header"],
                 "--step-number-header", o["step_number_header"],
-                "--number-header", o["number_header"]]
+                "--number-header", o["number_header"],
+                "--transition-header", o["transition_header"],
+                "--transition-number-header", o["transition_number_header"],
+                "--transition-opc-header", o["transition_opc_header"]]
         if not o["sort"]:
             argv.append("--no-sort")
+        if not o["group"]:
+            argv.append("--no-group")
         if o["name_label"]:
             argv += ["--name-label", o["name_label"]]
         if o["pages_column"]:

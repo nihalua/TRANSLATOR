@@ -10,7 +10,8 @@ import argparse
 import sys
 from dataclasses import dataclass
 
-from .excel_writer import Sheet, write_workbook
+from .excel_writer import (DEFAULT_STEP_HEADERS, DEFAULT_TRANSITION_HEADERS, Sheet,
+                           write_workbook)
 from .pdf_numbers import DEFAULT_NUMBER_LABEL, find_step_numbers
 from .pdf_steps import DEFAULT_STEP_PATTERN, extract_step_names, parse_page_range
 
@@ -61,10 +62,21 @@ def build_parser() -> argparse.ArgumentParser:
                    help="optional column listing the PDF 2 pages each number came from")
     x.add_argument("--start-row", type=int, default=1,
                    help="row of the header (data starts below it) (default: 1)")
-    x.add_argument("--step-header", default="Step", help="header text for the step column")
-    x.add_argument("--step-number-header", default="Step no.",
-                   help="header text for the step number column")
-    x.add_argument("--number-header", default="Number", help="header text for the number column")
+    x.add_argument("--step-header", default=DEFAULT_STEP_HEADERS[0],
+                   help="header of the name column in the steps (S...) table")
+    x.add_argument("--step-number-header", default=DEFAULT_STEP_HEADERS[1],
+                   help="header of the step number column in the steps table")
+    x.add_argument("--number-header", default=DEFAULT_STEP_HEADERS[2],
+                   help="header of the PDF 2 number column in the steps table")
+    x.add_argument("--transition-header", default=DEFAULT_TRANSITION_HEADERS[0],
+                   help="header of the name column in the transitions (T...) table")
+    x.add_argument("--transition-number-header", default=DEFAULT_TRANSITION_HEADERS[1],
+                   help="header of the step number column in the transitions table")
+    x.add_argument("--transition-opc-header", default=DEFAULT_TRANSITION_HEADERS[2],
+                   help="header of the PDF 2 number column in the transitions table")
+    x.add_argument("--no-group", action="store_true",
+                   help="one table per sheet instead of separate steps (S) and transitions (T) "
+                        "tables")
     x.add_argument("--no-sort", action="store_true",
                    help="keep the order of PDF 1 instead of sorting the steps alphabetically")
     x.add_argument("--no-header", action="store_true", help="do not write a header row")
@@ -165,9 +177,13 @@ def run(args: argparse.Namespace, log=print, jobs: list[Job] | None = None) -> i
         step_header=None if args.no_header else args.step_header,
         step_number_header=None if args.no_header else args.step_number_header,
         number_header=None if args.no_header else args.number_header,
+        transition_header=args.transition_header,
+        transition_number_header=args.transition_number_header,
+        transition_opc_header=args.transition_opc_header,
         separator=args.separator,
         not_found_text=args.not_found,
         sort=not args.no_sort,
+        group=not args.no_group,
     )
     log(f"Excel file written: {args.output} ({len(sheets)} sheet(s))")
     if failed:

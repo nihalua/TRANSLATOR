@@ -36,16 +36,19 @@ def read_sheet(path: str, sheet: str, step_col="A", step_no_col="B", number_col=
         bc = column_index_from_string(step_no_col) if step_no_col else None
         nc = column_index_from_string(number_col)
         out = ExcelSheet(sheet)
-        for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
+        for row in ws.iter_rows(min_row=header_row, values_only=True):
             def cell(c):
                 return row[c - 1] if c and c - 1 < len(row) else None
             step = cell(sc)
             if step is None or str(step).strip() == "":
-                continue
+                continue  # blank row between the steps and transitions tables
             step = str(step).strip()
             if step.upper().startswith("ERROR"):
                 out.error = step
                 continue
+            if not re.search(r"\d", step):
+                continue  # a table header ("Step", "Transition", ...); a real step name
+                # without digits would still be reported as missing by the PDF 1 check
             out.rows.append((step, cell(bc), split_numbers(cell(nc))))
         return out
     finally:

@@ -47,11 +47,12 @@ def test_tampered_file_is_caught(pdfs, tmp_path):
                "--sequence", "3.1:3:"])
     wb = load_workbook(out)
     ws = wb["Sequence 01"]
-    # rows: S01, S02, T00, T01 -> delete T01, change S02's number, add a fake step
-    ws.delete_rows(5)
+    # rows: 1 header, 2 S01, 3 S02, 4 blank, 5 header, 6 T00, 7 T01
+    # -> delete T01, change S02's number, add a fake step, break T00's step no.
+    ws.delete_rows(7)
     ws["C3"] = 301
-    ws["A6"], ws["B6"], ws["C6"] = "S77", 77, 500
-    ws["B4"] = 5  # T00 -> step no. should be 0
+    ws["A7"], ws["B7"], ws["C7"] = "S77", 77, 500
+    ws["B6"] = 5  # T00 -> step no. should be 0
     wb.save(out)
 
     reports, _ = run_check(_cfg(out, *pdfs, [("3.1", "3", "")]))

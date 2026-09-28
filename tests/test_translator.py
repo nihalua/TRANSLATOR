@@ -133,12 +133,37 @@ def test_end_to_end_excel(pdfs, tmp_path):
     ws = load_workbook(out).active
     rows = [tuple(c.value for c in r) for r in ws.iter_rows(min_row=1, max_col=3)]
     assert rows == [
-        ("Step", "Step no.", "Number"),
+        ("Step", "Step", "Step OPC UA Number"),
         ("S01", 1, "201 OR 202 OR 203"),
         ("S02", 2, 300),
+        (None, None, None),
+        ("Transition", "Transition", "Transition OPC UA Number"),
         ("T00", 0, 100),
         ("T01", 1, 101),
     ]
+
+
+def test_formatting(pdfs, tmp_path):
+    out = tmp_path / "mapping.xlsx"
+    main(["--pdf1", str(pdfs[0]), "--section", "3.1", "--pdf2", str(pdfs[1]),
+          "--pdf2-pages", "1-5", "--output", str(out)])  # S02 (page 7) gets no number
+    ws = load_workbook(out).active
+    for ref in ("A1", "C1", "A5", "C5"):  # header rows of both tables
+        assert ws[ref].fill.fgColor.rgb.endswith("FFFF00") and ws[ref].font.bold
+    for ref in ("A2", "B6", "C7"):
+        cell = ws[ref]
+        assert cell.alignment.horizontal == "center"
+        assert cell.border.left.style == cell.border.bottom.style == "thin"
+    assert ws["C3"].value is None and ws["C3"].fill.fgColor.rgb.endswith("D9D9D9")  # grey
+    assert ws["A4"].value is None and ws["A4"].border.left.style is None  # blank separator row
+
+
+def test_no_group_single_table(pdfs, tmp_path):
+    out = tmp_path / "mapping.xlsx"
+    main(["--pdf1", str(pdfs[0]), "--section", "3.1", "--pdf2", str(pdfs[1]),
+          "--output", str(out), "--no-group"])
+    ws = load_workbook(out).active
+    assert [c.value for c in ws["A"]] == ["Step", "S01", "S02", "T00", "T01"]
 
 
 def test_custom_layout(pdfs, tmp_path):
@@ -158,12 +183,15 @@ def test_document_order_and_pdf2_pages(pdfs, tmp_path):
     ws = load_workbook(out).active
     rows = [tuple(c.value for c in r) for r in ws.iter_rows(min_row=1, max_col=3)]
     # Pages 4-7 are not searched: S01 keeps only the number from page 3, S02 has none.
+    # --no-sort keeps the PDF order inside each table.
     assert rows == [
-        ("Step", None, "Number"),
-        ("T00", None, 100),
-        ("T01", None, 101),
+        ("Step", None, "Step OPC UA Number"),
         ("S01", None, 201),
         ("S02", None, None),
+        (None, None, None),
+        ("Transition", None, "Transition OPC UA Number"),
+        ("T00", None, 100),
+        ("T01", None, 101),
     ]
 
 
@@ -364,11 +392,13 @@ def test_multiple_sequences_one_sheet_each(pdfs, tmp_path):
     wb = load_workbook(out)
     assert wb.sheetnames == ["Sequence 01", "Sequence 02", "Sequence 03", "Check"]
     rows = [r for r in wb["Sequence 01"].iter_rows(min_row=2, max_col=3, values_only=True)]
-    assert rows == [("S01", 1, "201 OR 202 OR 203"), ("S02", 2, None), ("T00", 0, 100),
-                    ("T01", 1, 101)]
-    assert [r for r in wb["Sequence 02"].iter_rows(min_row=2, max_col=3, values_only=True)] == \
-        [("Z99", 99, 777)]
-    assert "ERROR" in wb["Sequence 03"]["A2"].value
+    assert rows == [("S01", 1, "201 OR 202 OR 203"), ("S02", 2, None), (None, None, None),
+                    ("Transition", "Transition", "Transition OPC UA Number"),
+                    ("T00", 0, 100), ("T01", 1, 101)]
+    # Z99 is neither S nor T: own table with an "Other" header
+    assert [r for r in wb["Sequence 02"].iter_rows(min_row=1, max_col=3, values_only=True)] == \
+        [("Other", "Other", "Other OPC UA Number"), ("Z99", 99, 777)]
+    assert "ERROR" in wb["Sequence 03"]["A1"].value
     checks = [c.value for c in wb["Check"]["A"]]
     assert any(c.startswith("Sequence 01: No number found in PDF 2 for: S02") for c in checks[1:])
     assert any(c.startswith("Sequence 03: ERROR") for c in checks[1:])

@@ -3,10 +3,18 @@
 Creates a new Excel file that maps each **step name** (from a table in PDF 1) to its
 **step number(s)** (from the `number:` field in PDF 2).
 
-| Step | Step no. | Number            |
-| ---- | -------- | ----------------- |
-| S01  | 1        | 201 OR 202 OR 203 |
-| T10  | 10       | 100               |
+| Step       | Step       | Step OPC UA Number       |
+| ---------- | ---------- | ------------------------ |
+| S01        | 1          | 201 OR 202 OR 203        |
+| S02        | 2          | 300                      |
+|            |            |                          |
+| **Transition** | **Transition** | **Transition OPC UA Number** |
+| T10        | 10         | 100                      |
+
+Each sheet has a table of steps (S…) and, after a blank row, a table of transitions
+(T…), each with a yellow header row; all cells are centred with thin borders, and a
+step without a number has a grey cell. Names with another prefix go into a third
+table ("Other"). `--no-group` puts everything in one table.
 
 ## How it works
 
@@ -90,7 +98,9 @@ python -m translator --pdf1 spec.pdf --pdf2 steps.pdf -o mapping.xlsx \
 | `--number-column` | `C` | Excel column for the numbers from PDF 2 |
 | `--no-sort` | | Keep the order of PDF 1 instead of sorting alphabetically |
 | `--start-row` | `1` | Row of the header; data starts on the row below |
-| `--step-header` / `--step-number-header` / `--number-header` | `Step` / `Step no.` / `Number` | Header texts |
+| `--step-header` / `--step-number-header` / `--number-header` | `Step` / `Step` / `Step OPC UA Number` | Header texts of the steps table |
+| `--transition-header` / `--transition-number-header` / `--transition-opc-header` | `Transition` / `Transition` / `Transition OPC UA Number` | Header texts of the transitions table |
+| `--no-group` | | One table per sheet instead of separate steps and transitions tables |
 | `--no-header` | | Do not write a header row |
 | `--sheet` | `Mapping` | Sheet name |
 | `--pages-column` | | Extra column listing the PDF 2 pages each number was read from (handy for checking) |
