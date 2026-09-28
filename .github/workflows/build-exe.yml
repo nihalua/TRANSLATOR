@@ -26,8 +26,8 @@ jobs:
 
       - name: Build exes
         run: |
-          pyinstaller --onefile --windowed --name TRANSLATOR run_translator.py
-          pyinstaller --onefile --windowed --name CHECKER run_checker.py
+          pyinstaller --onefile --windowed --name TRANSLATOR --icon icons/translator.ico --add-data "icons/translator.ico;icons" run_translator.py
+          pyinstaller --onefile --windowed --name CHECKER --icon icons/checker.ico --add-data "icons/checker.ico;icons" run_checker.py
 
       - uses: actions/upload-artifact@v4
         with:

@@ -148,6 +148,20 @@ def main(argv: list[str] | None = None) -> int:
 
 # ------------------------------------------------------------------------ GUI
 
+def _set_icon(root) -> None:
+    """Own window/taskbar icon (green check mark), so CHECKER and TRANSLATOR look different."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    try:  # separate taskbar button instead of being grouped with other Python/Tk apps
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("CHECKER.app")
+    except Exception:
+        pass
+    try:
+        root.iconbitmap(default=str(base / "icons" / "checker.ico"))
+    except Exception:
+        pass  # not on Windows, or icon missing: keep the default icon
+
+
 def launch_gui() -> int:
     import tkinter as tk
     from tkinter import filedialog, messagebox, scrolledtext
@@ -157,6 +171,7 @@ def launch_gui() -> int:
 
     root = tk.Tk()
     root.title("CHECKER - independent check of the step/number Excel file")
+    _set_icon(root)
 
     files = tk.LabelFrame(root, text="Files", padx=6, pady=4)
     files.grid(row=0, column=0, columnspan=2, sticky="ew", padx=6, pady=4)

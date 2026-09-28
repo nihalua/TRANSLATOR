@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import threading
 from pathlib import Path
 
@@ -25,6 +26,20 @@ def _save_settings(data: dict) -> None:
         pass  # remembering the inputs is a convenience only
 
 
+def _set_icon(root) -> None:
+    """Own window/taskbar icon (blue "T"), so TRANSLATOR and CHECKER look different."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    try:  # separate taskbar button instead of being grouped with other Python/Tk apps
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TRANSLATOR.app")
+    except Exception:
+        pass
+    try:
+        root.iconbitmap(default=str(base / "icons" / "translator.ico"))
+    except Exception:
+        pass  # not on Windows, or icon missing: keep the default icon
+
+
 def launch(parser: argparse.ArgumentParser) -> int:
     import tkinter as tk
     from tkinter import filedialog, messagebox, scrolledtext
@@ -34,7 +49,8 @@ def launch(parser: argparse.ArgumentParser) -> int:
 
     saved = _load_settings()
     root = tk.Tk()
-    root.title("PDF step -> number mapper")
+    root.title("TRANSLATOR - PDF step -> number mapper")
+    _set_icon(root)
 
     # ---------------------------------------------------------------- files
     files = tk.LabelFrame(root, text="Files", padx=6, pady=4)
