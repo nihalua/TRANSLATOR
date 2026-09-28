@@ -24,10 +24,14 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
-      - name: Build exe
-        run: pyinstaller --onefile --windowed --name TRANSLATOR run_translator.py
+      - name: Build exes
+        run: |
+          pyinstaller --onefile --windowed --name TRANSLATOR run_translator.py
+          pyinstaller --onefile --windowed --name CHECKER run_checker.py
 
       - uses: actions/upload-artifact@v4
         with:
           name: TRANSLATOR-windows
-          path: dist/TRANSLATOR.exe
+          path: |
+            dist/TRANSLATOR.exe
+            dist/CHECKER.exe

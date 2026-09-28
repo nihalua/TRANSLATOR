@@ -38,7 +38,7 @@ Creates a new Excel file that maps each **step name** (from a table in PDF 1) to
 
 ## Windows exe (no Python needed)
 
-Every push builds `TRANSLATOR.exe` on GitHub:
+Every push builds `TRANSLATOR.exe` and `CHECKER.exe` on GitHub:
 
 1. Open the repository on GitHub → **Actions** → **Build Windows exe**.
 2. Click the latest successful run and download **TRANSLATOR-windows** under *Artifacts*.
@@ -108,6 +108,42 @@ Example with a custom layout:
 python -m translator --pdf1 spec.pdf --section 3.1 --pdf2 steps.pdf -o mapping.xlsx \
     --pdf2-pages 100-250 --start-row 2 --name-label "name:" --pages-column D
 ```
+
+## CHECKER – independent double check
+
+`CHECKER.exe` (`python -m checker`) verifies a finished Excel file against the two
+PDFs. It shares **no code** with TRANSLATOR and reads the PDFs with a different
+engine (PyMuPDF instead of pdfplumber), so a mistake in one is unlikely to be
+repeated by the other. It reads the Excel file itself, so manual edits (e.g. the OR
+choices you resolved) are checked too.
+
+Per sequence it checks:
+
+- **PDF 1**
+  - every step in the sheet is found in the section (between its heading and the
+    next section heading) and sits in the step-name column;
+  - every step-like word in the step-name column is in the sheet (a missed step is
+    an ERROR);
+  - the section does not continue after the given page range;
+  - no step appears twice, and the step no. column matches the name (T10 → 10).
+- **PDF 2** – every `number:` field on the given pages is assigned to the nearest
+  step name *above it on the page* (a geometric rule, unlike TRANSLATOR's text order):
+  - every number in the sheet is confirmed this way;
+  - every number found for a step or one of its variants (S01_1, S01_2, ...) is in
+    that step's row.
+
+Results are shown in the window and saved next to the checked file as
+`<name>_CHECK_REPORT.xlsx` (sheets *Summary* and *Issues*: ERROR = must look,
+WARNING = should look, INFO = for information, e.g. OR alternatives still left).
+The window is pre-filled from TRANSLATOR's saved inputs ("Copy everything from
+TRANSLATOR" refreshes them).
+
+```bash
+python -m checker --excel mapping.xlsx --pdf1 spec.pdf --pdf2 steps.pdf \
+    --sequence "3.1:3-7:100-250" --sequence "3.2:8-9:251-300"
+```
+
+Exit code: 0 = all checks passed, 1 = errors or warnings, 2 = the check could not run.
 
 ## Development
 
