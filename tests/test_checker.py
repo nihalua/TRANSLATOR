@@ -96,3 +96,24 @@ def test_step_at_page_bottom_confirmed(tmp_path, pdfs):
     rep = reports[0]
     assert rep.excel_steps == 6 and rep.steps_confirmed == 6
     assert not any("step-name column of PDF 1" in e for e in _issues(reports, "ERROR"))
+
+
+def test_missed_step_in_similar_sequences_is_caught(tmp_path, pdfs):
+    """A step left out of the sheet is reported even when a similar sequence on a
+    nearby page has the same name at the same place (it is not a page header)."""
+    from test_translator import make_similar_sequences_pdf
+
+    p1 = tmp_path / "similar.pdf"
+    names, ranges = make_similar_sequences_pdf(p1, n_sequences=4)
+    out = tmp_path / "mapping.xlsx"
+    translate(["--pdf1", str(p1), "--pdf2", str(pdfs[1]), "-o", str(out),
+               "--sequence", f"3.3:{ranges[3]}:"])
+    wb = load_workbook(out)
+    ws = wb["Sequence 01"]
+    sheet_steps = [c.value for c in ws["A"]]
+    assert set(names) <= set(sheet_steps)
+    ws.delete_rows(sheet_steps.index("T00") + 1)  # T00 sits right below the heading
+    wb.save(out)
+    reports, _ = run_check(_cfg(out, p1, pdfs[1], [("3.3", ranges[3], "")]))
+    errors = "\n".join(_issues(reports, "ERROR"))
+    assert "T00 is in the step-name column of PDF 1 but NOT in the Excel sheet" in errors

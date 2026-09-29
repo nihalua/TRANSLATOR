@@ -29,8 +29,16 @@ table ("Other"). `--no-group` puts everything in one table.
    step-like words (this also works for "tables" that are really framed blocks, one
    per step, with the name in a box on the left). If that gives nothing, tables with
    and without ruling lines are tried, and finally the first word of each text line.
-   Page headers/footers are recognised because they repeat at the same place on the
-   neighbouring pages, so a step name right at the top or bottom of a page is kept.
+   Page headers/footers are recognised because they sit in the top/bottom 15% of the
+   page and repeat at the same place on the neighbouring pages (at least two of them,
+   including the page right before or after). So a step name right at the top or bottom
+   of a page is kept, and so are step names that similar sequences (T00, S01, ...)
+   have at the same place on nearby pages. Below the section heading nothing is taken
+   as a page header. The section ends at the next heading aligned with the section
+   heading (numbered text inside the table, e.g. `10 s wait`, does not end it);
+   headings ending in a number (`3.6 Sequence Stack 2`) are found too. If the table
+   sits at another position on one page, that page's own step column is used and the
+   page is listed on the Check sheet.
 4. **Safety check.** Nothing is dropped silently: any other text found in the
    step-name column (e.g. a name split as `T 60`) and any step-like word skipped as a
    header/footer is listed in the log and on a red **Check** sheet in the Excel file,

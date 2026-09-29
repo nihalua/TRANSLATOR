@@ -17,6 +17,8 @@ MAX_SECTION_PAGES = 50
 
 # A table-of-contents line: dotted leaders and/or a trailing page number.
 _TOC_LINE = re.compile(r"(\.{3,}|…|\s\.\s\.)|\s\d+\s*$")
+# Dotted leaders only: a heading may end in a number ("3.6 Sequence Stack 2").
+_TOC_LEADERS = re.compile(r"\.{3,}|…|\s\.\s\.")
 # Any numbered heading, e.g. "3 Results", "3.2 Steps", "4.1.2. Details".
 _ANY_HEADING = re.compile(r"^\s*(?P<num>\d+(?:\.\d+)*)\.?\s+[A-Za-z]")
 # Characters trimmed around the step name in a cell, e.g. "T00:" or "(S01)".
@@ -36,6 +38,14 @@ class _Region:
     page_index: int
     top: float
     bottom: float
+    # True when `top` is the section heading: nothing below it is a page header
+    # (a footer still can be).
+    body_from_top: bool = False
+
+    def furniture(self, page, text: str, top: float) -> bool:
+        if self.body_from_top and self.top + 1 < top < float(page.page.height) / 2:
+            return False
+        return page.is_repeated(text, top)
 
 
 def parse_page_range(text: str) -> list[int]:
@@ -66,6 +76,22 @@ def _section_regex(section: str) -> re.Pattern:
 def _is_subsection(num: str, section: str) -> bool:
     section = section.strip().rstrip(".")
     return num == section or num.startswith(section + ".")
+
+
+def _ends_section(num: str, section: str) -> bool:
+    """True when heading `num` can follow `section` (3.6 -> 3.7, 4, 4.1, ...).
+
+    Numbered text inside the table ("1 Start", "10 s wait") is not a heading: its
+    number is lower than the section, or jumps more than one chapter ahead."""
+    if _is_subsection(num, section):
+        return False
+    a = [int(x) for x in num.split(".")]
+    b = [int(x) for x in section.strip().rstrip(".").split(".")]
+    return a > b and a[0] <= b[0] + 1
+
+
+# Tolerance (points) for a heading to count as aligned with the section heading.
+HEADING_X_TOLERANCE = 8
 
 
 def _find_in_outline(pdf_path: str, section: str) -> int | None:
@@ -102,6 +128,8 @@ class _Page:
     # (page numbers such as "3 of 20" look like headings). Step names are NOT
     # filtered by this margin; see is_repeated().
     MARGIN = 0.07
+    # Page headers/footers only live in this outer band of the page (top/bottom).
+    FURNITURE_BAND = 0.15
     # How far (in points) text may move between pages and still be the same header.
     REPEAT_TOLERANCE = 6
     # Pages before/after compared to recognise headers and footers.
@@ -130,15 +158,25 @@ class _Page:
         return self._tops
 
     def is_repeated(self, text: str, top: float) -> bool:
-        """True for page headers/footers: the same text at the same height on a
-        neighbouring page. A step name is unique, so it is never removed this way."""
-        for j in range(self.index - self.NEIGHBOURS, self.index + self.NEIGHBOURS + 1):
-            if j == self.index or not 0 <= j < self._n:
-                continue
-            tops = self._get(j)._word_tops().get(text, [])
-            if any(abs(t - top) <= self.REPEAT_TOLERANCE for t in tops):
-                return True
-        return False
+        """True for page headers/footers: text in the top/bottom band of the page that
+        is at the same height on most of the neighbouring pages.
+
+        Similar sequences often use the same step names (T00, S01, ...) at the same
+        place on nearby pages, so being repeated once is not enough: a header/footer
+        must also sit in the outer band and repeat on at least two neighbouring pages,
+        one of them directly before or after (one page when there is only one)."""
+        height = float(self.page.height)
+        band = height * self.FURNITURE_BAND
+        if band < top < height - band:
+            return False
+        neighbours = [j for j in range(self.index - self.NEIGHBOURS, self.index + self.NEIGHBOURS + 1)
+                      if j != self.index and 0 <= j < self._n]
+        hits = [j for j in neighbours
+                if any(abs(t - top) <= self.REPEAT_TOLERANCE
+                       for t in self._get(j)._word_tops().get(text, []))]
+        # A header/footer is on every page, so also on the page right before or after.
+        adjacent = any(abs(j - self.index) == 1 for j in hits)
+        return adjacent and len(hits) >= min(2, len(neighbours))
 
     def in_margin(self, top: float) -> bool:
         height = float(self.page.height)
@@ -159,21 +197,34 @@ class _Page:
         return any(t.bbox[1] - 1 <= line["top"] <= t.bbox[3] + 1 for t in self.tables("lines"))
 
     def headings(self):
-        """(top, number, text) of numbered headings outside tables, headers/footers and TOC."""
+        """(top, number, text, x0) of numbered headings outside tables, headers/footers and TOC."""
         out = []
         for line in self.lines:
             if self.in_margin(line["top"]):
                 continue
             m = _ANY_HEADING.match(line["text"])
-            if m and not _TOC_LINE.search(line["text"]) and not self._in_table(line):
-                out.append((line["top"], m.group("num"), line["text"]))
+            if m and not _TOC_LEADERS.search(line["text"]) and not self._in_table(line):
+                out.append((line["top"], m.group("num"), line["text"], line["x0"]))
         return out
 
-    def section_top(self, pattern: re.Pattern) -> float | None:
+    def section_line(self, pattern: re.Pattern, strict: bool = True):
+        """The heading line of the section. `strict` also rejects headings ending in a
+        number (they look like a TOC line); use strict=False on the given pages."""
+        toc = _TOC_LINE if strict else _TOC_LEADERS
         for line in self.lines:
-            if pattern.match(line["text"]) and not _TOC_LINE.search(line["text"]):
-                return line["top"]
+            if pattern.match(line["text"]) and not toc.search(line["text"]):
+                return line
         return None
+
+    def looks_like_toc(self) -> bool:
+        """A table-of-contents page: several numbered lines ending in a page number."""
+        entries = [l for l in self.lines
+                   if _ANY_HEADING.match(l["text"]) and _TOC_LINE.search(l["text"])]
+        return len(entries) >= 3
+
+    def section_top(self, pattern: re.Pattern) -> float | None:
+        line = self.section_line(pattern)
+        return line["top"] if line else None
 
 
 def _regions(pdf, pdf_path, section, pages, log):
@@ -193,14 +244,14 @@ def _regions(pdf, pdf_path, section, pages, log):
     else:
         indices = None
 
-    start_index, start_top = None, 0.0
+    start_index, start_top, start_x = None, 0.0, None
     if section:
         pattern = _section_regex(section)
         if indices is not None:
             for i in indices:
-                top = get(i).section_top(pattern)
-                if top is not None:
-                    start_index, start_top = i, top
+                line = get(i).section_line(pattern, strict=False)
+                if line is not None:
+                    start_index, start_top, start_x = i, line["top"], line["x0"]
                     break
             if start_index is None:
                 log(f"  Note: heading {section} not found on the given pages; using the whole pages.")
@@ -208,12 +259,21 @@ def _regions(pdf, pdf_path, section, pages, log):
             outline_page = _find_in_outline(pdf_path, section)
             if outline_page is not None:
                 start_index = outline_page
-                start_top = get(outline_page).section_top(pattern) or 0.0
+                line = get(outline_page).section_line(pattern, strict=False)
+                if line is not None:
+                    start_top, start_x = line["top"], line["x0"]
             else:
-                for i in range(n):
-                    top = get(i).section_top(pattern)
-                    if top is not None:
-                        start_index, start_top = i, top
+                # First headings that cannot be a TOC line; then also headings ending
+                # in a number ("3.6 Sequence Stack 2"), skipping table-of-contents pages.
+                for strict in (True, False):
+                    for i in range(n):
+                        if not strict and get(i).looks_like_toc():
+                            continue
+                        line = get(i).section_line(pattern, strict=strict)
+                        if line is not None:
+                            start_index, start_top, start_x = i, line["top"], line["x0"]
+                            break
+                    if start_index is not None:
                         break
             if start_index is None:
                 raise SectionNotFoundError(
@@ -231,18 +291,26 @@ def _regions(pdf, pdf_path, section, pages, log):
     for i in indices:
         page = get(i)
         top, bottom = 0.0, float(page.page.height)
+        # On the page of the section heading, everything below the heading is content
+        # (never a page header), even if a similar sequence has it at the same place.
+        started_here = False
         if not started:
             if i != start_index:
                 continue
             started, top = True, start_top
-        # Stop at the next heading that is not part of the section.
-        if section:
+            started_here = start_top > 0
+        # Stop at the next heading that is not part of the section. Only a heading
+        # aligned with the section heading counts (numbered text in the table does not).
+        if section and start_index is not None:
             stop = next((h for h in page.headings()
-                         if h[0] > top + 1 and not _is_subsection(h[1], section)), None)
+                         if h[0] > top + 1 and _ends_section(h[1], section)
+                         and (start_x is None or abs(h[3] - start_x) <= HEADING_X_TOLERANCE)),
+                        None)
             if stop is not None:
-                regions.append(_Region(i, top, stop[0]))
+                regions.append(_Region(i, top, stop[0], body_from_top=started_here))
+                log(f"  Section ends at '{stop[2].strip()}' on page {i + 1}.")
                 break
-        regions.append(_Region(i, top, bottom))
+        regions.append(_Region(i, top, bottom, body_from_top=started_here))
     return regions, get
 
 
@@ -330,7 +398,7 @@ def _steps_by_position(regions, get, regex, log, warnings) -> list[str]:
             name = w["text"].strip(_TRIM)
             if name and regex.match(name):
                 entry = (region.page_index, w["top"], w["x0"], w["x1"], name)
-                (furniture if page.is_repeated(name, w["top"]) else found).append(entry)
+                (furniture if region.furniture(page, name, w["top"]) else found).append(entry)
     if not found:
         return []
 
@@ -354,6 +422,25 @@ def _steps_by_position(regions, get, regex, log, warnings) -> list[str]:
     # Leftmost column holding at least two names (a stray word left of the table
     # is ignored); a single name only counts when nothing else was found.
     column = next((c for c in columns if len(c) >= 2), columns[0])
+    col_x0 = min(w[2] for w in column)
+    col_x1 = max(w[3] for w in column)
+    # Column position per page (normally the same on every page).
+    page_cols = {i: (col_x0, col_x1) for i in {w[0] for w in column}}
+
+    # A page where the table sits elsewhere (landscape page, other margins) has no
+    # name in that column: take that page's own leftmost column instead, so its
+    # steps are not lost without a word.
+    prefixes = {re.match(r"[A-Za-z]*", w[4]).group().upper() for w in column}
+    for page_index in sorted({w[0] for w in found} - set(page_cols)):
+        shifted = _shifted_column(page_index, [w for w in found if w[0] == page_index],
+                                  get(page_index), same_column, prefixes)
+        if shifted:
+            column += shifted
+            page_cols[page_index] = (min(w[2] for w in shifted), max(w[3] for w in shifted))
+            warnings.append(
+                f"PDF 1 page {page_index + 1}: the step names are at another position than on "
+                f"the other pages; read from there: {', '.join(w[4] for w in shifted)}. "
+                "Please check this page.")
     column.sort(key=lambda w: (w[0], w[1]))
     steps: list[str] = []
     per_page: dict[int, list[str]] = {}
@@ -366,9 +453,11 @@ def _steps_by_position(regions, get, regex, log, warnings) -> list[str]:
         log(f"    page {page_index + 1}: {', '.join(names)}")
 
     # --- Safety checks: never drop something silently. ---
-    col_x0 = min(w[2] for w in column)
-    col_x1 = max(w[3] for w in column)
     seen: set[str] = set()
+
+    def in_col(page_index, centre):
+        x0, x1 = page_cols.get(page_index, (col_x0, col_x1))
+        return x0 - 5 <= centre <= x1 + 5
 
     def warn(message: str):
         if message not in seen and len(seen) < 100:
@@ -377,7 +466,7 @@ def _steps_by_position(regions, get, regex, log, warnings) -> list[str]:
 
     skipped: dict[str, list[int]] = {}
     for word in furniture:
-        if col_x0 - 5 <= (word[2] + word[3]) / 2 <= col_x1 + 5:
+        if in_col(word[0], (word[2] + word[3]) / 2):
             skipped.setdefault(word[4], [])
             if word[0] + 1 not in skipped[word[4]]:
                 skipped[word[4]].append(word[0] + 1)
@@ -394,17 +483,40 @@ def _steps_by_position(regions, get, regex, log, warnings) -> list[str]:
                 continue
             if abs(top - region.top) < 3 and region is regions[0]:
                 continue  # the section heading itself
-            centre = (w["x0"] + w["x1"]) / 2
-            if not (col_x0 - 5 <= centre <= col_x1 + 5):
+            if not in_col(region.page_index, (w["x0"] + w["x1"]) / 2):
                 continue
             text = w["text"].strip(_TRIM)
             if not text or (region.page_index, round(top, 1), text) in taken:
                 continue
-            if page.is_repeated(text, top):
+            if region.furniture(page, text, top):
                 continue  # page header/footer text (step-like ones are reported above)
             warn(f"PDF 1 page {region.page_index + 1}: '{w['text']}' is in the step-name "
                  "column but was not taken as a step name.")
     return steps
+
+
+def _shifted_column(page_index, words, page, same_column, prefixes) -> list:
+    """The leftmost column of step names on a page whose table is shifted, or [].
+
+    Only accepted when it clearly is a step-name column: at least two names, with
+    the same prefixes as elsewhere (S, T, ...), each the first word of its line."""
+    columns: list[list] = []
+    for word in sorted(words, key=lambda w: w[2]):
+        for col in columns:
+            if same_column(word, col[0]):
+                col.append(word)
+                break
+        else:
+            columns.append([word])
+    column = next((c for c in columns if len(c) >= 2), None)
+    if not column:
+        return []
+    for w in column:
+        if re.match(r"[A-Za-z]*", w[4]).group().upper() not in prefixes:
+            return []
+        if any(abs(o["top"] - w[1]) < 3 and o["x1"] <= w[2] for o in page.words()):
+            return []  # text left of it on the same line: a reference in a description
+    return column
 
 
 def _steps_from_tables(regions, get, strategy, regex, diagnostics, warnings) -> list[str]:
@@ -418,7 +530,7 @@ def _steps_from_tables(regions, get, strategy, regex, diagnostics, warnings) -> 
                 if not row or not (region.top - 1 <= top < region.bottom):
                     continue
                 step = _step_from_cell(row[0], regex)
-                if step and page.is_repeated(step, top):
+                if step and region.furniture(page, step, top):
                     warnings.append(f"PDF 1 page {region.page_index + 1}: '{step}' was skipped as "
                                     "a page header/footer (same text on a neighbouring page).")
                     continue

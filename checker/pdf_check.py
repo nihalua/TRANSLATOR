@@ -113,14 +113,20 @@ class Pdf:
         return out
 
     def repeats_nearby(self, word: Word, text: str) -> bool:
-        """Page header/footer: same text at the same place on a neighbouring page."""
-        for p in (word.page - 2, word.page - 1, word.page + 1, word.page + 2):
-            if 1 <= p <= self.n:
-                for other in self.words(p):
-                    if other.text.strip(_STRIP) == text and abs(other.y0 - word.y0) <= 6 \
-                            and abs(other.x0 - word.x0) <= 6:
-                        return True
-        return False
+        """Page header/footer: text in the top/bottom 15% of the page that is at the same
+        place on at least two neighbouring pages, one of them right before or after.
+
+        Similar sequences use the same step names at the same place on nearby pages,
+        so a single repetition in the body of the page does not make a header."""
+        height = self.doc[word.page - 1].rect.height
+        if 0.15 * height < word.y0 < 0.85 * height:
+            return False
+        near = [p for p in (word.page - 2, word.page - 1, word.page + 1, word.page + 2)
+                if 1 <= p <= self.n]
+        hits = [p for p in near
+                if any(other.text.strip(_STRIP) == text and abs(other.y0 - word.y0) <= 6
+                       and abs(other.x0 - word.x0) <= 6 for other in self.words(p))]
+        return any(abs(p - word.page) == 1 for p in hits) and len(hits) >= min(2, len(near))
 
     def close(self):
         self.doc.close()
@@ -246,7 +252,9 @@ def check_pdf1(pdf: Pdf, sequence: str, section: str | None, pages_text: str | N
     for w in candidates:
         if w.text in excel_set:
             continue
-        if in_column(w) and not pdf.repeats_nearby(w, w.text):
+        below_heading = (start is not None and w.page == start[0] and w.y0 > start[1]
+                         and w.y0 < pdf.doc[w.page - 1].rect.height / 2)
+        if in_column(w) and (below_heading or not pdf.repeats_nearby(w, w.text)):
             report.add(ERROR, f"{w.text} is in the step-name column of PDF 1 but NOT in the "
                        "Excel sheet (missed step?).", w.text, w.page)
         elif _prefix(w.text) in prefixes:

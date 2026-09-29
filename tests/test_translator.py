@@ -402,3 +402,75 @@ def test_multiple_sequences_one_sheet_each(pdfs, tmp_path):
     checks = [c.value for c in wb["Check"]["A"]]
     assert any(c.startswith("Sequence 01: No number found in PDF 2 for: S02") for c in checks[1:])
     assert any(c.startswith("Sequence 03: ERROR") for c in checks[1:])
+
+
+def make_similar_sequences_pdf(path, n_sequences=6, shift_page=None, numbered_text=False):
+    """Several similar sequences, two pages each, same layout and mostly the same step
+    names at the same place on nearby pages, with a page header and footer on every page.
+    Headings end in a number ("3.4 Sequence 4")."""
+    c = canvas.Canvas(str(path), pagesize=A4)
+    width, height = A4
+    names = ["T00", "S01", "T01", "S02", "T02"] + \
+        [f"S{10 + i}" if i % 2 else f"T{10 + i}" for i in range(1, 14)]
+    state = {"page": 0}
+
+    def new_page():
+        if state["page"]:
+            c.showPage()
+        state["page"] += 1
+        c.drawString(72, height - 25, "EL2024 Sequence description")
+        c.drawString(72, 20, f"DOC7 page {state['page']}")
+
+    new_page()
+    c.drawString(72, 700, "Contents")
+    ranges = {}
+    for k in range(1, n_sequences + 1):
+        new_page()
+        first = state["page"]
+        c.drawString(60, 780, f"3.{k} Sequence {k}")
+        y = 750
+        for name in names:
+            if y - 60 < 40:
+                new_page()
+                y = 790
+            dx = 45 if state["page"] == shift_page else 0
+            c.rect(60 + dx, y - 60, 50, 60)
+            c.rect(110 + dx, y - 60, 400, 60)
+            c.drawString(72 + dx, y - 14, name)
+            c.drawString(120 + dx, y - 14, "check XV101")
+            if numbered_text:  # numbered text in the table, aligned like a heading
+                c.drawString(64 + dx, y - 40, "10 s wait")
+            y -= 68
+        ranges[k] = f"{first}-{state['page']}"
+    c.showPage()
+    c.save()
+    return names, ranges
+
+
+def test_similar_sequences_on_neighbouring_pages(tmp_path):
+    """The same step names at the same place on nearby pages are not page headers."""
+    p1 = tmp_path / "similar.pdf"
+    names, ranges = make_similar_sequences_pdf(p1)
+    for k, pages in ranges.items():
+        warnings = []
+        from translator.pdf_steps import parse_page_range
+        steps = extract_step_names(str(p1), f"3.{k}", pages=parse_page_range(pages),
+                                   warnings=warnings)
+        assert steps == names, (k, pages)
+        assert extract_step_names(str(p1), f"3.{k}") == names
+        # The real header/footer is still recognised (and reported).
+        assert any("'EL2024'" in w for w in warnings)
+
+
+def test_numbered_text_in_table_does_not_end_section(tmp_path):
+    p1 = tmp_path / "numbered.pdf"
+    names, ranges = make_similar_sequences_pdf(p1, n_sequences=3, numbered_text=True)
+    assert extract_step_names(str(p1), "3.2") == names
+
+
+def test_table_shifted_on_one_page(tmp_path):
+    p1 = tmp_path / "shifted.pdf"
+    names, ranges = make_similar_sequences_pdf(p1, n_sequences=2, shift_page=3)
+    warnings = []
+    assert extract_step_names(str(p1), "3.1", warnings=warnings) == names
+    assert any("page 3: the step names are at another position" in w for w in warnings)
